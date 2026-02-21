@@ -112,9 +112,11 @@ COPY config/run-once.service /etc/systemd/system/
 COPY config/dns-watch.service /etc/systemd/system/
 COPY config/dns-watch.timer /etc/systemd/system/
 COPY config/ssh-bridge.service /etc/systemd/system/
-RUN systemctl enable run-once.service && \
-    systemctl enable dns-watch.service && \
-    systemctl enable ssh-bridge.service
+# Enable services via symlinks (systemctl not available during build)
+RUN mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf /etc/systemd/system/run-once.service /etc/systemd/system/multi-user.target.wants/run-once.service && \
+    ln -sf /etc/systemd/system/dns-watch.service /etc/systemd/system/multi-user.target.wants/dns-watch.service && \
+    ln -sf /etc/systemd/system/ssh-bridge.service /etc/systemd/system/multi-user.target.wants/ssh-bridge.service
 
 # ── Cleanup ──────────────────────────────────────────────────────────
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
