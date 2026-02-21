@@ -19,9 +19,17 @@ LOG_TAG="caelicode-run-once"
 log() { echo "[${LOG_TAG}] $*"; }
 warn() { echo "[${LOG_TAG}] WARNING: $*" >&2; }
 
+# Timeout wrapper — prevents Windows interop calls from blocking boot.
+# WSL's cmd.exe / powershell.exe can hang when the interop pipe isn't ready.
+run_with_timeout() {
+    local secs="$1"; shift
+    timeout --signal=KILL "$secs" "$@" 2>/dev/null || true
+}
+
 # ── User Creation ────────────────────────────────────────────────────
 # Extract Windows username (strip domain prefix if present)
-RAWUSER=$(/mnt/c/windows/system32/cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r' || true)
+# Uses timeout to avoid hanging if Windows interop isn't ready
+RAWUSER=$(run_with_timeout 10 /mnt/c/windows/system32/cmd.exe /c "echo %USERNAME%" | tr -d '\r' || true)
 NEWUSER=$(echo "$RAWUSER" | awk -F'\\\\' '{print $NF}' | awk -F'/' '{print $NF}')
 
 if [ -z "$NEWUSER" ]; then
@@ -68,10 +76,10 @@ if [ -s "$DNSFILE" ]; then
     log "DNS already configured in ${DNSFILE}"
 else
     log "Initializing DNS from Windows configuration..."
-    DNSLIST=$(/mnt/c/windows/system32/windowspowershell/v1.0/powershell.exe \
+    DNSLIST=$(run_with_timeout 15 /mnt/c/windows/system32/windowspowershell/v1.0/powershell.exe \
         -NoProfile -NonInteractive -Command \
         "Get-DnsClientServerAddress -AddressFamily IPv4 | Select-Object -ExpandProperty ServerAddresses | Sort-Object -Unique" \
-        2>/dev/null | tr -d '\r' || true)
+        | tr -d '\r' || true)
 
     if [ -n "$DNSLIST" ]; then
         : > "$DNSFILE"
