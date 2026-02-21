@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CaeliCode WSL — User creation tests
-# Tests the run-once.sh script logic (simulated, since we can't access Windows in CI)
+# Tests the boot.sh user creation logic (simulated, since we can't access Windows in CI)
 set -euo pipefail
 
 PASS=0; FAIL=0
@@ -17,13 +17,12 @@ check() {
 echo "── User Creation Tests ──"
 
 # Script exists and is executable
-check "run-once.sh exists" test -x /opt/caelicode/scripts/run-once.sh
-check "run-once.service exists" test -f /etc/systemd/system/run-once.service
+check "boot.sh exists" test -x /opt/caelicode/scripts/boot.sh
 
 # Simulate user creation
 TESTUSER="testcaelicode"
 if ! getent passwd "$TESTUSER" >/dev/null 2>&1; then
-    useradd -ms /bin/bash "$TESTUSER"
+    useradd -ms /bin/zsh "$TESTUSER"
     usermod -aG sudo "$TESTUSER"
     echo "${TESTUSER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${TESTUSER}"
     chmod 0440 "/etc/sudoers.d/${TESTUSER}"

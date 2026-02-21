@@ -134,17 +134,6 @@ RUN chmod +x /opt/caelicode/test/*.sh 2>/dev/null || true
 RUN chsh -s /bin/zsh root && \
     sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd 2>/dev/null || true
 
-# ── Systemd services ────────────────────────────────────────────────
-COPY config/run-once.service /etc/systemd/system/
-COPY config/dns-watch.service /etc/systemd/system/
-COPY config/dns-watch.timer /etc/systemd/system/
-COPY config/ssh-bridge.service /etc/systemd/system/
-# Enable services via symlinks (systemctl not available during build)
-RUN mkdir -p /etc/systemd/system/multi-user.target.wants && \
-    ln -sf /etc/systemd/system/run-once.service /etc/systemd/system/multi-user.target.wants/run-once.service && \
-    ln -sf /etc/systemd/system/dns-watch.service /etc/systemd/system/multi-user.target.wants/dns-watch.service && \
-    ln -sf /etc/systemd/system/ssh-bridge.service /etc/systemd/system/multi-user.target.wants/ssh-bridge.service
-
 # ── Persist environment for WSL ──────────────────────────────────────
 # Docker ENV is lost on `docker export` → `wsl --import`. Write PATH and
 # other critical vars to /etc/environment (read by WSL on boot) and
