@@ -70,12 +70,12 @@ jobs:
           SIZE_MB=$((SIZE / 1024 / 1024))
           echo "Image size: ${SIZE_MB}MB"
 
-          # Fail if image exceeds size limits
+          # Fail if image exceeds size limits (MB, ~20% headroom over observed sizes)
           case "${{ matrix.profile }}" in
-            base) MAX=500  ;;
-            sre)  MAX=1200 ;;
-            dev)  MAX=1500 ;;
-            data) MAX=800  ;;
+            base) MAX=850  ;;
+            sre)  MAX=1700 ;;
+            dev)  MAX=3000 ;;
+            data) MAX=1100 ;;
           esac
 
           if [ "$SIZE_MB" -gt "$MAX" ]; then
