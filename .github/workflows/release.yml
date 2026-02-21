@@ -123,13 +123,14 @@ jobs:
         id: version
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release
+      - name: Upload assets to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: CaeliCode WSL ${{ steps.version.outputs.tag }}
+          append_body: true
           body: |
-            ## CaeliCode WSL ${{ steps.version.outputs.tag }}
+
+            ---
 
             ### Profile images
             | Profile | Description |

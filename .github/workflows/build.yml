@@ -1,5 +1,7 @@
 # CaeliCode WSL — Build & Test Matrix
 # Builds all 4 profiles in parallel, runs test suites inside each image.
+# On main: after all builds pass, semantic-release creates a version tag
+# which triggers the release workflow.
 
 name: Build & Test
 
@@ -9,6 +11,9 @@ on:
     paths-ignore: ["docs/**", "*.md", "LICENSE"]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: write
 
 concurrency:
   group: build-${{ github.ref }}
@@ -119,3 +124,32 @@ jobs:
         with:
           dockerfile: Dockerfile
           failure-threshold: error
+
+  release:
+    name: Semantic Release
+    needs: [build, lint]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install semantic-release
+        run: npm install --no-save semantic-release @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/github conventional-changelog-conventionalcommits
+
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+        run: npx semantic-release
