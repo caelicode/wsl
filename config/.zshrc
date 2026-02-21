@@ -3,13 +3,6 @@
 # If not running interactively, don't do anything
 [[ -o interactive ]] || return
 
-# ── Helper: timeout-protected eval ───────────────────────────────
-# Prevents any single init command from hanging the shell.
-_timed_eval() {
-    local out
-    out=$(timeout 5 "$@" 2>/dev/null) && eval "$out"
-}
-
 # ── PATH (must come first) ───────────────────────────────────────
 export PATH="/opt/mise/bin:/opt/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
@@ -28,42 +21,45 @@ ZSH_THEME=""  # Disabled — using Starship prompt instead
 DISABLE_AUTO_UPDATE=true
 DISABLE_MAGIC_FUNCTIONS=true
 
-# Only load lightweight plugins — skip kubectl/terraform/docker
-# as they run slow completion init on every shell start
 plugins=(git)
 [[ -d "$ZSH/custom/plugins/zsh-autosuggestions" ]] && plugins+=(zsh-autosuggestions)
 [[ -d "$ZSH/custom/plugins/zsh-syntax-highlighting" ]] && plugins+=(zsh-syntax-highlighting)
+command -v kubectl &>/dev/null && plugins+=(kubectl)
+command -v terraform &>/dev/null && plugins+=(terraform)
+command -v docker &>/dev/null && plugins+=(docker)
 
 if [[ -f "$ZSH/oh-my-zsh.sh" ]]; then
     source "$ZSH/oh-my-zsh.sh"
 fi
 
 # ── Mise (Tool Version Manager) ───────────────────────────────────
-# Shims already provide tool access via PATH. `mise activate` adds
-# directory-based auto-switching hooks — skip if it hangs.
 if command -v mise &>/dev/null; then
-    _timed_eval mise activate zsh
+    eval "$(mise activate zsh)"
 fi
 
 # ── Starship Prompt ───────────────────────────────────────────────
+# The mise shim for starship hangs in WSL during `starship init zsh`.
+# Bypass it by locating the actual binary under /opt/mise/installs/.
 export STARSHIP_CONFIG="/etc/caelicode/starship.toml"
-if command -v starship &>/dev/null; then
-    _timed_eval starship init zsh
+_starship_bin=$(find /opt/mise/installs/starship -maxdepth 2 -name "starship" -type f 2>/dev/null | head -1)
+if [[ -n "$_starship_bin" && -x "$_starship_bin" ]]; then
+    eval "$("$_starship_bin" init zsh)"
 fi
+unset _starship_bin
 
 # ── Zoxide (smart cd) ─────────────────────────────────────────────
 if command -v zoxide &>/dev/null; then
-    _timed_eval zoxide init zsh
+    eval "$(zoxide init zsh)"
 fi
 
 # ── Direnv ─────────────────────────────────────────────────────────
 if command -v direnv &>/dev/null; then
-    _timed_eval direnv hook zsh
+    eval "$(direnv hook zsh)"
 fi
 
 # ── FZF Integration ───────────────────────────────────────────────
 if command -v fzf &>/dev/null; then
-    _timed_eval fzf --zsh
+    source <(fzf --zsh 2>/dev/null) || true
 fi
 
 # ── Aliases ────────────────────────────────────────────────────────
@@ -90,6 +86,3 @@ if [ -z "$CAELICODE_MOTD_SHOWN" ]; then
     echo -e "\033[1;36m  ╚═══════════════════════════════════════════╝\033[0m"
     echo ""
 fi
-
-# Cleanup
-unfunction _timed_eval 2>/dev/null
