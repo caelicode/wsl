@@ -36,7 +36,7 @@ if getent passwd "$NEWUSER" >/dev/null 2>&1; then
     log "User '$NEWUSER' already exists — skipping creation"
 else
     log "Creating user '$NEWUSER' with sudo access..."
-    useradd -ms /bin/bash "$NEWUSER"
+    useradd -ms /bin/zsh "$NEWUSER"
     usermod -aG sudo "$NEWUSER"
     # Passwordless sudo for convenience (user can harden later)
     echo "${NEWUSER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${NEWUSER}"
@@ -54,18 +54,12 @@ fi
 USER_HOME="/home/${NEWUSER}"
 
 # Copy CaeliCode shell config if user doesn't already have custom ones
-for f in .bashrc .bash_aliases; do
+for f in .bashrc .bash_aliases .zshrc; do
     if [ ! -f "${USER_HOME}/${f}" ] || [ ! -s "${USER_HOME}/${f}" ]; then
         cp "/etc/skel/${f}" "${USER_HOME}/${f}" 2>/dev/null || true
         chown "${NEWUSER}:${NEWUSER}" "${USER_HOME}/${f}" 2>/dev/null || true
     fi
 done
-
-# Ensure mise is activated for the user
-if ! grep -q "mise activate" "${USER_HOME}/.bashrc" 2>/dev/null; then
-    echo 'eval "$(mise activate bash)"' >> "${USER_HOME}/.bashrc"
-    chown "${NEWUSER}:${NEWUSER}" "${USER_HOME}/.bashrc"
-fi
 
 # ── DNS Initialization ───────────────────────────────────────────────
 DNSFILE="/etc/resolv.conf"

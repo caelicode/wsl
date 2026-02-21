@@ -1,43 +1,69 @@
 #!/usr/bin/env bash
 # CaeliCode WSL — In-place updater
-# Updates scripts, config templates, and tool manifests from the latest GitHub release
-# without reimporting the entire WSL distro. User home directories are never touched.
+# Updates scripts, configs, tool versions, and shell templates from the latest
+# GitHub release — without reimporting the entire WSL distro.
+# User home directories and personal settings are never touched.
 #
 # Usage:
 #   caelicode-update              # Update to latest
 #   caelicode-update --dry-run    # Show what would change
 #   caelicode-update --version    # Show current version
+#   caelicode-update --full       # Full re-import guide (major upgrades)
 
 set -euo pipefail
 
 REPO="caelicode/wsl"
 INSTALL_DIR="/opt/caelicode"
+ETC_DIR="/etc/caelicode"
+SKEL_DIR="/etc/skel"
+MISE_CONFIG="/opt/mise/config/config.toml"
 VERSION_FILE="${INSTALL_DIR}/VERSION"
+PROFILE_FILE="${INSTALL_DIR}/PROFILE"
 TEMP_DIR=$(mktemp -d)
 
 # shellcheck disable=SC2064
 trap "rm -rf $TEMP_DIR" EXIT
 
-log() { echo "[caelicode-update] $*"; }
-err() { echo "[caelicode-update] ERROR: $*" >&2; }
+log()  { echo "[caelicode-update] $*"; }
+err()  { echo "[caelicode-update] ERROR: $*" >&2; }
+warn() { echo "[caelicode-update] WARNING: $*" >&2; }
 
 # ── Parse Arguments ──────────────────────────────────────────────────
 DRY_RUN=false
 SHOW_VERSION=false
+FULL_UPGRADE=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run)   DRY_RUN=true; shift ;;
         --version)   SHOW_VERSION=true; shift ;;
+        --full)      FULL_UPGRADE=true; shift ;;
         -h|--help)
-            echo "Usage: caelicode-update [--dry-run] [--version]"
-            echo ""
-            echo "Updates CaeliCode WSL scripts and config from the latest GitHub release."
-            echo "Your home directory and personal settings are never modified."
-            echo ""
-            echo "Options:"
-            echo "  --dry-run   Show what would change without applying"
-            echo "  --version   Show current installed version"
+            cat <<'HELP'
+Usage: caelicode-update [OPTIONS]
+
+Updates CaeliCode WSL scripts, configs, and tool versions from the
+latest GitHub release. Your home directory is never modified.
+
+Options:
+  --dry-run   Show what would change without applying
+  --version   Show current installed version and profile
+  --full      Show guide for a full distro re-import (major upgrades)
+  -h, --help  Show this help message
+
+What gets updated:
+  • /opt/caelicode/scripts/      Runtime scripts (DNS, SSH, proxy, update)
+  • /opt/caelicode/profiles/     Tool version manifests (TOML)
+  • /etc/caelicode/              Starship prompt, branding config
+  • /etc/skel/                   Shell templates for new users
+  • mise tools                   Installed versions are upgraded to match
+
+What is NOT touched:
+  • Your home directory (~/)
+  • Your personal dotfiles
+  • Any systemd service changes (requires full re-import)
+  • Any new apt packages (requires full re-import)
+HELP
             exit 0
             ;;
         *)
@@ -47,18 +73,56 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ── Version Check ────────────────────────────────────────────────────
+# ── Version / Profile Info ───────────────────────────────────────────
 CURRENT_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || echo "unknown")
+CURRENT_PROFILE=$(cat "$PROFILE_FILE" 2>/dev/null || echo "unknown")
 
 if $SHOW_VERSION; then
     echo "CaeliCode WSL ${CURRENT_VERSION}"
-    echo "Profile: $(cat "${INSTALL_DIR}/PROFILE" 2>/dev/null || echo "unknown")"
+    echo "Profile: ${CURRENT_PROFILE}"
     exit 0
 fi
 
-log "Current version: ${CURRENT_VERSION}"
+# ── Full Upgrade Guide ───────────────────────────────────────────────
+if $FULL_UPGRADE; then
+    DISTRO_NAME="caelicode-${CURRENT_PROFILE}"
+    cat <<EOF
 
-# Fetch latest release info
+╔═══════════════════════════════════════════════════════════════╗
+║  CaeliCode WSL — Full Distro Upgrade                        ║
+╚═══════════════════════════════════════════════════════════════╝
+
+Use this when a release includes new system packages, OS-level
+changes, or breaking updates that can't be applied in-place.
+
+Step 1 — Back up your data:
+  mkdir -p /mnt/c/caelicode-backup
+  cp -r ~/  /mnt/c/caelicode-backup/home-backup
+
+Step 2 — Note your current config:
+  cat /etc/caelicode/config.yaml
+  cat ~/.gitconfig
+
+Step 3 — From PowerShell (as Administrator), unregister and re-import:
+  wsl --shutdown
+  wsl --unregister ${DISTRO_NAME}
+  irm https://raw.githubusercontent.com/caelicode/wsl/main/install.ps1 | iex
+
+Step 4 — After re-import, restore your data:
+  cp -r /mnt/c/caelicode-backup/home-backup/.ssh ~/
+  cp -r /mnt/c/caelicode-backup/home-backup/.gitconfig ~/
+  # ... restore other personal files as needed
+
+Step 5 — Clean up backup:
+  Remove-Item -Recurse -Force C:\\caelicode-backup
+
+EOF
+    exit 0
+fi
+
+# ── Check for Updates ────────────────────────────────────────────────
+log "Current version: ${CURRENT_VERSION} (${CURRENT_PROFILE} profile)"
+
 RELEASE_JSON=$(curl -sf "https://api.github.com/repos/${REPO}/releases/latest" || true)
 
 if [ -z "$RELEASE_JSON" ]; then
@@ -67,8 +131,8 @@ if [ -z "$RELEASE_JSON" ]; then
     exit 1
 fi
 
-LATEST_VERSION=$(echo "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)
-CHANGELOG=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body','No changelog available'))" 2>/dev/null || echo "")
+LATEST_VERSION=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null || echo "")
+CHANGELOG=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body',''))" 2>/dev/null || echo "")
 
 if [ -z "$LATEST_VERSION" ]; then
     err "Could not determine latest version"
@@ -92,52 +156,95 @@ fi
 
 if $DRY_RUN; then
     log "[DRY RUN] Would update from ${CURRENT_VERSION} to ${LATEST_VERSION}"
+    log "[DRY RUN] Would download source archive and update:"
+    log "[DRY RUN]   - /opt/caelicode/scripts/"
+    log "[DRY RUN]   - /opt/caelicode/profiles/"
+    log "[DRY RUN]   - /etc/caelicode/starship.toml"
+    log "[DRY RUN]   - /etc/skel/.bashrc, .bash_aliases, .zshrc"
+    log "[DRY RUN]   - mise tool versions"
     exit 0
 fi
 
-# ── Download Update Bundle ───────────────────────────────────────────
-BUNDLE_URL="https://github.com/${REPO}/releases/download/${LATEST_VERSION}/caelicode-update-${LATEST_VERSION}.tar.gz"
-CHECKSUM_URL="https://github.com/${REPO}/releases/download/${LATEST_VERSION}/checksums.txt"
+# ── Download Source Archive ──────────────────────────────────────────
+ARCHIVE_URL="https://github.com/${REPO}/archive/refs/tags/${LATEST_VERSION}.tar.gz"
 
-log "Downloading update bundle..."
+log "Downloading source archive..."
 cd "$TEMP_DIR"
 
-if ! curl -sfL -o "update.tar.gz" "$BUNDLE_URL"; then
-    err "Failed to download update bundle"
-    err "URL: ${BUNDLE_URL}"
+if ! curl -sfL -o "source.tar.gz" "$ARCHIVE_URL"; then
+    err "Failed to download source archive"
+    err "URL: ${ARCHIVE_URL}"
     exit 1
 fi
 
-# Verify checksum
-if curl -sfL -o "checksums.txt" "$CHECKSUM_URL"; then
-    if grep "update" checksums.txt | sha256sum -c --quiet 2>/dev/null; then
-        log "Checksum verified"
-    else
-        err "Checksum verification failed — aborting"
-        exit 1
-    fi
-else
-    log "Warning: Could not verify checksum (checksums.txt not found)"
+tar xzf source.tar.gz
+# GitHub extracts to: wsl-<version-without-v>/ e.g. wsl-0.4.0/
+EXTRACT_DIR=$(ls -d wsl-*/ 2>/dev/null | head -1)
+
+if [ -z "$EXTRACT_DIR" ] || [ ! -d "$EXTRACT_DIR" ]; then
+    err "Could not find extracted source directory"
+    exit 1
 fi
 
-# ── Apply Update ─────────────────────────────────────────────────────
-log "Applying update..."
-tar xzf update.tar.gz
+log "Extracted to ${EXTRACT_DIR}"
 
-# Update scripts
-if [ -d "scripts" ]; then
-    sudo cp -r scripts/* "${INSTALL_DIR}/scripts/"
+# ── Apply Updates ────────────────────────────────────────────────────
+
+# 1. Scripts
+if [ -d "${EXTRACT_DIR}scripts" ]; then
+    log "Updating scripts..."
+    sudo cp -r "${EXTRACT_DIR}scripts/"* "${INSTALL_DIR}/scripts/"
     sudo chmod +x "${INSTALL_DIR}/scripts/"*.sh 2>/dev/null || true
     sudo chmod +x "${INSTALL_DIR}/scripts/caelicode-update" 2>/dev/null || true
+    log "  ✓ Scripts updated"
 fi
 
-# Update profiles
-if [ -d "profiles" ]; then
-    sudo cp -r profiles/* "${INSTALL_DIR}/profiles/"
+# 2. Profiles (tool version manifests)
+if [ -d "${EXTRACT_DIR}profiles" ]; then
+    log "Updating profiles..."
+    sudo cp -r "${EXTRACT_DIR}profiles/"* "${INSTALL_DIR}/profiles/"
+    log "  ✓ Profiles updated"
 fi
 
-# Update version marker
+# 3. Starship config
+if [ -f "${EXTRACT_DIR}config/starship.toml" ]; then
+    log "Updating starship config..."
+    sudo cp "${EXTRACT_DIR}config/starship.toml" "${ETC_DIR}/starship.toml"
+    log "  ✓ Starship config updated"
+fi
+
+# 4. Shell templates (for new users — existing users keep theirs)
+if [ -d "${EXTRACT_DIR}config" ]; then
+    log "Updating shell templates in /etc/skel..."
+    for f in .bashrc .bash_aliases .zshrc; do
+        if [ -f "${EXTRACT_DIR}config/${f}" ]; then
+            sudo cp "${EXTRACT_DIR}config/${f}" "${SKEL_DIR}/${f}"
+        fi
+    done
+    log "  ✓ Shell templates updated"
+fi
+
+# 5. Update active mise profile and install new tool versions
+log "Updating tool versions via mise..."
+PROFILE_TOML="${INSTALL_DIR}/profiles/${CURRENT_PROFILE}.toml"
+
+if [ -f "$PROFILE_TOML" ]; then
+    sudo cp "$PROFILE_TOML" "$MISE_CONFIG"
+    mise install --env "$MISE_CONFIG" 2>&1 | tail -20
+    mise reshim
+    log "  ✓ Tool versions updated"
+else
+    warn "Profile TOML not found: ${PROFILE_TOML} — skipping tool update"
+fi
+
+# 6. Update version marker
 echo "$LATEST_VERSION" | sudo tee "$VERSION_FILE" > /dev/null
 
-log "Updated to ${LATEST_VERSION}"
-log "Restart your shell or run: source ~/.bashrc"
+echo ""
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log "Updated: ${CURRENT_VERSION} → ${LATEST_VERSION}"
+log "Restart your shell or run: exec \$SHELL"
+log ""
+log "Note: If the update included new apt packages or OS-level"
+log "changes, run 'caelicode-update --full' for a re-import guide."
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

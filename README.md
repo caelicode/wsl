@@ -87,6 +87,32 @@ cd wsl
 wsl --import caelicode-sre C:\wsl\caelicode images/caelicode-wsl-sre.tar
 ```
 
+## Updating
+
+### In-place update (recommended)
+
+Most updates — new tool versions, script fixes, config improvements — can be applied without reimporting:
+
+```bash
+# Check what's available
+caelicode-update --dry-run
+
+# Apply the update
+caelicode-update
+```
+
+This downloads the latest release from GitHub, updates scripts, configs, and tool version manifests, then runs `mise install` to upgrade your tools. Your home directory and personal settings are never touched.
+
+### Full re-import (major upgrades)
+
+Some releases include new system packages, shell changes, or OS-level updates that can't be applied in-place. When that's the case, the release notes will say so. Run:
+
+```bash
+caelicode-update --full
+```
+
+This prints a step-by-step guide to back up your data, unregister the old distro, re-import the new one, and restore your files.
+
 ## Uninstall
 
 To completely remove a CaeliCode WSL distro:
