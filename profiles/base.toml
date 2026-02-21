@@ -1,2 +1,15 @@
 [tools]
 python = "3.12.9"
+
+# Modern CLI essentials
+"github-cli" = "latest"
+fzf = "latest"
+ripgrep = "latest"
+fd = "latest"
+bat = "latest"
+eza = "latest"
+delta = "latest"
+starship = "latest"
+direnv = "latest"
+zoxide = "latest"
+yq = "latest"

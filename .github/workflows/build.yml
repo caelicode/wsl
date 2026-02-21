@@ -75,12 +75,16 @@ jobs:
           SIZE_MB=$((SIZE / 1024 / 1024))
           echo "Image size: ${SIZE_MB}MB"
 
-          # Fail if image exceeds size limits (MB, ~20% headroom over observed sizes)
+          # Fail if image exceeds size limits (MB)
+          # base: ~1100MB (Python + modern CLI tools + zsh/oh-my-zsh)
+          # sre:  ~3500MB (base + k8s + IaC + AWS/Azure/GCloud CLIs)
+          # dev:  ~4500MB (base + Node/Go/Rust/Java/Bun + dev tools)
+          # data: ~1800MB (base + dbt + jupyter + duckdb + DB clients)
           case "${{ matrix.profile }}" in
-            base) MAX=850  ;;
-            sre)  MAX=1700 ;;
-            dev)  MAX=3000 ;;
-            data) MAX=1100 ;;
+            base) MAX=1500 ;;
+            sre)  MAX=5000 ;;
+            dev)  MAX=5000 ;;
+            data) MAX=2000 ;;
           esac
 
           if [ "$SIZE_MB" -gt "$MAX" ]; then

@@ -29,10 +29,17 @@ check() {
 
 echo "── Data Profile Tests ──"
 
+# Core data tools
 check_version "python3" "python3 --version"
 check_version "uv" "uv --version"
 check_version "psql" "psql --version"
+check_version "sqlite3" "sqlite3 --version"
+check_version "duckdb" "duckdb --version"
 check "dbt installed" command -v dbt
+check "jupyter installed" command -v jupyter
+
+# Redis client
+check_version "redis-cli" "redis-cli --version"
 
 # Profile marker
 PROFILE=$(cat /opt/caelicode/PROFILE 2>/dev/null || echo "unknown")

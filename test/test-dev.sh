@@ -18,13 +18,32 @@ check_version() {
     fi
 }
 
+check() {
+    local name="$1"; shift
+    if "$@" >/dev/null 2>&1; then
+        echo "  ✓ ${name}"; PASS=$((PASS + 1))
+    else
+        echo "  ✗ ${name}"; FAIL=$((FAIL + 1))
+    fi
+}
+
 echo "── Dev Profile Tests ──"
 
+# Language runtimes
 check_version "node" "node --version"
 check_version "go" "go version"
 check_version "rustc" "rustc --version"
+check_version "java" "java --version"
+check_version "bun" "bun --version"
 check_version "uv" "uv --version"
+
+# Container tools
 check_version "podman" "podman --version"
+
+# Developer tools
+check_version "lazygit" "lazygit --version"
+check_version "shellcheck" "shellcheck --version"
+check_version "hadolint" "hadolint --version"
 
 # Profile marker
 PROFILE=$(cat /opt/caelicode/PROFILE 2>/dev/null || echo "unknown")

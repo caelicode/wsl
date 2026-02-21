@@ -26,17 +26,38 @@ check_version() {
 
 echo "── Base Profile Tests ──"
 
-# Core tools
+# Core system tools
 check_version "git" "git --version"
 check_version "curl" "curl --version"
 check_version "jq" "jq --version"
 check_version "python3" "python3 --version"
 check_version "mise" "mise --version"
+check_version "zsh" "zsh --version"
+check_version "tmux" "tmux -V"
+
+# Modern CLI tools (via mise)
+check_version "gh" "gh --version"
+check_version "fzf" "fzf --version"
+check_version "rg (ripgrep)" "rg --version"
+check_version "fd" "fd --version"
+check_version "bat" "bat --version"
+check_version "eza" "eza --version"
+check_version "delta" "delta --version"
+check_version "starship" "starship --version"
+check_version "direnv" "direnv --version"
+check_version "zoxide" "zoxide --version"
+check_version "yq" "yq --version"
+
+# Oh My Zsh
+check "oh-my-zsh installed" test -d /opt/oh-my-zsh
+check "zsh-autosuggestions plugin" test -d /opt/oh-my-zsh/custom/plugins/zsh-autosuggestions
+check "zsh-syntax-highlighting plugin" test -d /opt/oh-my-zsh/custom/plugins/zsh-syntax-highlighting
 
 # CaeliCode structure
 check "VERSION file exists" test -f /opt/caelicode/VERSION
 check "PROFILE file exists" test -f /opt/caelicode/PROFILE
 check "config.yaml exists" test -f /etc/caelicode/config.yaml
+check "starship.toml exists" test -f /etc/caelicode/starship.toml
 check "wsl.conf exists" test -f /etc/wsl.conf
 check "run-once.sh exists" test -x /opt/caelicode/scripts/run-once.sh
 check "dns-watch.sh exists" test -x /opt/caelicode/scripts/dns-watch.sh
@@ -47,6 +68,7 @@ check "caelicode-update in PATH" test -L /usr/local/bin/caelicode-update
 # Shell config
 check "bashrc in skel" test -f /etc/skel/.bashrc
 check "bash_aliases in skel" test -f /etc/skel/.bash_aliases
+check "zshrc in skel" test -f /etc/skel/.zshrc
 
 # WSL config
 check "systemd enabled in wsl.conf" grep -q "systemd = true" /etc/wsl.conf

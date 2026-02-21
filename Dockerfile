@@ -29,15 +29,22 @@ RUN apt-get update -q && apt-get upgrade -y && apt-get install -y --no-install-r
     dnsutils \
     git \
     gnupg \
+    htop \
+    iputils-ping \
     jq \
+    locales \
     nano \
     netcat-openbsd \
     openssh-client \
     socat \
     sudo \
+    tmux \
+    tree \
     unzip \
     vim \
     wget \
+    zip \
+    zsh \
     # Python build dependencies
     build-essential \
     libbz2-dev \
@@ -53,6 +60,16 @@ RUN apt-get update -q && apt-get upgrade -y && apt-get install -y --no-install-r
     zlib1g-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# ── Locale setup ──────────────────────────────────────────────────────
+RUN locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+# ── Oh My Zsh (system-wide) ──────────────────────────────────────────
+RUN git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git /opt/oh-my-zsh && \
+    git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions /opt/oh-my-zsh/custom/plugins/zsh-autosuggestions && \
+    git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting /opt/oh-my-zsh/custom/plugins/zsh-syntax-highlighting
+
 # ── Mise (tool version manager) ─────────────────────────────────────
 ENV MISE_DATA_DIR=/opt/mise
 ENV XDG_DATA_HOME=/opt/mise
@@ -67,7 +84,7 @@ RUN install -dm 755 /etc/apt/keyrings && \
     ln -sf /usr/bin/mise /opt/mise/bin/mise && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# ── Mise: install Python (shared across all profiles) ────────────────
+# ── Mise: install base tools (Python + modern CLI essentials) ────────
 COPY profiles/base.toml /opt/mise/config/config.toml
 RUN mise install --env /opt/mise/config/config.toml && mise reshim
 
@@ -78,16 +95,22 @@ ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV NODE_OPTIONS=--use-openssl-ca
 RUN git config --global http.sslcainfo /etc/ssl/certs/ca-certificates.crt
 
+# ── Starship prompt config ───────────────────────────────────────────
+ENV STARSHIP_CONFIG=/etc/caelicode/starship.toml
+
 # ── CaeliCode directory structure ────────────────────────────────────
 RUN mkdir -p /opt/caelicode/{scripts,profiles,test} /etc/caelicode
 
 # Copy configs
 COPY config/wsl.conf /etc/wsl.conf
 COPY config/caelicode.yaml /etc/caelicode/config.yaml
+COPY config/starship.toml /etc/caelicode/starship.toml
 COPY config/.bashrc /etc/skel/.bashrc
 COPY config/.bashrc /root/.bashrc
 COPY config/.bash_aliases /etc/skel/.bash_aliases
 COPY config/.bash_aliases /root/.bash_aliases
+COPY config/.zshrc /etc/skel/.zshrc
+COPY config/.zshrc /root/.zshrc
 
 # Copy scripts
 COPY scripts/ /opt/caelicode/scripts/
@@ -103,9 +126,9 @@ COPY profiles/ /opt/caelicode/profiles/
 COPY test/ /opt/caelicode/test/
 RUN chmod +x /opt/caelicode/test/*.sh 2>/dev/null || true
 
-# Ensure mise is in PATH for all users
-RUN echo 'export PATH="/opt/mise/bin:/opt/mise/shims:$PATH"' >> /etc/skel/.bashrc && \
-    echo 'export PATH="/opt/mise/bin:/opt/mise/shims:$PATH"' >> /root/.bashrc
+# ── Default shell: zsh ───────────────────────────────────────────────
+RUN chsh -s /bin/zsh root && \
+    sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd 2>/dev/null || true
 
 # ── Systemd services ────────────────────────────────────────────────
 COPY config/run-once.service /etc/systemd/system/
@@ -121,7 +144,7 @@ RUN mkdir -p /etc/systemd/system/multi-user.target.wants && \
 # ── Cleanup ──────────────────────────────────────────────────────────
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-CMD ["/bin/bash"]
+CMD ["/bin/zsh"]
 
 
 ###############################################################################
@@ -142,6 +165,18 @@ FROM base AS sre-image
 COPY profiles/sre.toml /opt/mise/config/config.toml
 RUN mise install --env /opt/mise/config/config.toml && mise reshim
 
+# Azure CLI (official Microsoft apt repository)
+RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Google Cloud SDK
+RUN curl -sSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+        gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
+        tee /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    apt-get update -q && apt-get install -y --no-install-recommends google-cloud-cli && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
 ARG VERSION=dev
 RUN echo "sre" > /opt/caelicode/PROFILE && \
     echo "${VERSION}" > /opt/caelicode/VERSION
@@ -152,7 +187,7 @@ RUN echo "sre" > /opt/caelicode/PROFILE && \
 ###############################################################################
 FROM base AS dev-image
 
-# Podman needs its own apt install
+# Container tools
 RUN apt-get update -q && apt-get install -y --no-install-recommends \
     podman \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -170,9 +205,11 @@ RUN echo "dev" > /opt/caelicode/PROFILE && \
 ###############################################################################
 FROM base AS data-image
 
-# PostgreSQL client + data dependencies
+# PostgreSQL client + Redis client + SQLite
 RUN apt-get update -q && apt-get install -y --no-install-recommends \
     postgresql-client \
+    redis-tools \
+    sqlite3 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY profiles/data.toml /opt/mise/config/config.toml
@@ -180,7 +217,8 @@ RUN mise install --env /opt/mise/config/config.toml && mise reshim
 
 # Install Python data tools via uv (after mise installs uv)
 ENV UV_TOOL_BIN_DIR=/usr/local/bin
-RUN /opt/mise/shims/uv tool install dbt-core --with dbt-postgres
+RUN /opt/mise/shims/uv tool install dbt-core --with dbt-postgres && \
+    /opt/mise/shims/uv tool install jupyterlab
 
 ARG VERSION=dev
 RUN echo "data" > /opt/caelicode/PROFILE && \

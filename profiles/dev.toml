@@ -1,6 +1,28 @@
 [tools]
 python = "3.12.9"
+
+# Modern CLI essentials (inherited from base)
+"github-cli" = "latest"
+fzf = "latest"
+ripgrep = "latest"
+fd = "latest"
+bat = "latest"
+eza = "latest"
+delta = "latest"
+starship = "latest"
+direnv = "latest"
+zoxide = "latest"
+yq = "latest"
+
+# Language runtimes
 nodejs = "24.13.1"
 golang = "1.26.0"
 rust = "1.93.1"
+java = "temurin-21"
+bun = "latest"
 uv = "0.6.3"
+
+# Developer tools
+lazygit = "latest"
+shellcheck = "latest"
+hadolint = "latest"

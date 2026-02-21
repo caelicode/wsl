@@ -18,13 +18,39 @@ check_version() {
     fi
 }
 
+check() {
+    local name="$1"; shift
+    if "$@" >/dev/null 2>&1; then
+        echo "  ✓ ${name}"; PASS=$((PASS + 1))
+    else
+        echo "  ✗ ${name}"; FAIL=$((FAIL + 1))
+    fi
+}
+
 echo "── SRE Profile Tests ──"
 
+# Kubernetes & orchestration
 check_version "kubectl" "kubectl version --client --short"
 check_version "helm" "helm version --short"
-check_version "terraform" "terraform --version"
 check_version "k9s" "k9s version --short"
 check_version "argocd" "argocd version --client --short"
+check_version "kubectx" "kubectx --version"
+check_version "kustomize" "kustomize version"
+check_version "stern" "stern --version"
+check_version "flux" "flux --version"
+
+# Infrastructure as Code
+check_version "terraform" "terraform --version"
+check_version "packer" "packer --version"
+check_version "vault" "vault --version"
+
+# Cloud CLIs
+check_version "aws" "aws --version"
+check_version "eksctl" "eksctl version"
+check_version "az (Azure)" "az --version"
+check_version "gcloud" "gcloud --version"
+
+# Security
 check_version "trivy" "trivy --version"
 
 # Profile marker

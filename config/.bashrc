@@ -22,64 +22,57 @@ if command -v mise &>/dev/null; then
     eval "$(mise activate bash)"
 fi
 
-# ── CaeliCode Branding ──────────────────────────────────────────────
-CAELICODE_CONFIG="/etc/caelicode/config.yaml"
-
-# Parse simple YAML values (key: value) without external deps
-_cc_config() {
-    local key="$1" default="$2"
-    if [ -f "$CAELICODE_CONFIG" ]; then
-        local val
-        val=$(grep -E "^\s+${key}:" "$CAELICODE_CONFIG" 2>/dev/null | head -1 | sed 's/.*: *//' | tr -d '"')
-        [ -n "$val" ] && echo "$val" || echo "$default"
-    else
-        echo "$default"
-    fi
-}
-
-# MOTD on login
-if [ "$(_cc_config motd_enabled true)" = "true" ]; then
-    if [ -z "$CAELICODE_MOTD_SHOWN" ]; then
-        export CAELICODE_MOTD_SHOWN=1
-        MOTD_TEXT=$(_cc_config motd_text "CaeliCode WSL")
-        PROFILE=$(cat /opt/caelicode/PROFILE 2>/dev/null || echo "base")
-        VERSION=$(cat /opt/caelicode/VERSION 2>/dev/null || echo "dev")
-
-        echo ""
-        echo -e "\033[1;36m  ╔═══════════════════════════════════════════╗\033[0m"
-        echo -e "\033[1;36m  ║\033[0m  \033[1;37m${MOTD_TEXT}\033[0m"
-        echo -e "\033[1;36m  ║\033[0m  \033[0;37mProfile: ${PROFILE} │ Version: ${VERSION}\033[0m"
-        echo -e "\033[1;36m  ╚═══════════════════════════════════════════╝\033[0m"
-        echo ""
-    fi
-fi
-
-# ── PS1 Prompt ───────────────────────────────────────────────────────
-_git_branch() {
-    if [ "$(_cc_config prompt_git_branch true)" = "true" ]; then
+# ── Starship Prompt ──────────────────────────────────────────────────
+export STARSHIP_CONFIG="/etc/caelicode/starship.toml"
+if command -v starship &>/dev/null; then
+    eval "$(starship init bash)"
+else
+    # Fallback PS1 if starship is not available
+    _git_branch() {
         local branch
         branch=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)
         [ -n "$branch" ] && echo " ($branch)"
-    fi
-}
+    }
 
-_k8s_context() {
-    if [ "$(_cc_config prompt_k8s_context true)" = "true" ] && command -v kubectl &>/dev/null; then
-        local ctx
-        ctx=$(kubectl config current-context 2>/dev/null)
-        [ -n "$ctx" ] && echo " ⎈${ctx}"
-    fi
-}
+    _k8s_context() {
+        if command -v kubectl &>/dev/null; then
+            local ctx
+            ctx=$(kubectl config current-context 2>/dev/null)
+            [ -n "$ctx" ] && echo " ⎈${ctx}"
+        fi
+    }
 
-# Color codes from config (defaults: green user, blue host, yellow path, magenta git, cyan k8s)
-C_USER="\[\033[01;$(_cc_config user 32)m\]"
-C_HOST="\[\033[01;$(_cc_config host 34)m\]"
-C_PATH="\[\033[01;$(_cc_config path 33)m\]"
-C_GIT="\[\033[01;$(_cc_config git 35)m\]"
-C_K8S="\[\033[01;$(_cc_config k8s 36)m\]"
-C_RST="\[\033[0m\]"
+    PS1="\[\033[01;32m\]\u\[\033[0m\]@\[\033[01;34m\]\h\[\033[0m\]:\[\033[01;33m\]\w\[\033[01;35m\]\$(_git_branch)\[\033[01;36m\]\$(_k8s_context)\[\033[0m\]\$ "
+fi
 
-PS1="${C_USER}\u${C_RST}@${C_HOST}\h${C_RST}:${C_PATH}\w${C_GIT}\$(_git_branch)${C_K8S}\$(_k8s_context)${C_RST}\$ "
+# ── Zoxide (smart cd) ────────────────────────────────────────────────
+if command -v zoxide &>/dev/null; then
+    eval "$(zoxide init bash)"
+fi
+
+# ── Direnv ────────────────────────────────────────────────────────────
+if command -v direnv &>/dev/null; then
+    eval "$(direnv hook bash)"
+fi
+
+# ── FZF Integration ──────────────────────────────────────────────────
+if command -v fzf &>/dev/null; then
+    eval "$(fzf --bash 2>/dev/null)" || true
+fi
+
+# ── CaeliCode MOTD ───────────────────────────────────────────────────
+if [ -z "$CAELICODE_MOTD_SHOWN" ]; then
+    export CAELICODE_MOTD_SHOWN=1
+    PROFILE=$(cat /opt/caelicode/PROFILE 2>/dev/null || echo "base")
+    VERSION=$(cat /opt/caelicode/VERSION 2>/dev/null || echo "dev")
+
+    echo ""
+    echo -e "\033[1;36m  ╔═══════════════════════════════════════════╗\033[0m"
+    echo -e "\033[1;36m  ║\033[0m  \033[1;37mCaeliCode WSL\033[0m"
+    echo -e "\033[1;36m  ║\033[0m  \033[0;37mProfile: ${PROFILE} │ Version: ${VERSION}\033[0m"
+    echo -e "\033[1;36m  ╚═══════════════════════════════════════════╝\033[0m"
+    echo ""
+fi
 
 # ── Aliases ──────────────────────────────────────────────────────────
 if [ -f ~/.bash_aliases ]; then
