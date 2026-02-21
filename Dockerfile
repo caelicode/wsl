@@ -158,8 +158,9 @@ COPY config/caelicode-env.sh /etc/profile.d/caelicode-env.sh
 # ── Pre-seed DNS fallback ────────────────────────────────────────────
 # WSL generateResolvConf is disabled. Provide sane defaults so DNS works
 # immediately. The run-once service upgrades this with Windows DNS later.
-RUN echo "nameserver 1.1.1.1" > /etc/resolv.conf && \
-    echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+# Note: /etc/resolv.conf is managed by Docker during build, so we write
+# the fallback to a staging file and copy it in via the run-once service.
+RUN printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/caelicode/resolv.conf.fallback
 
 # ── Cleanup ──────────────────────────────────────────────────────────
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

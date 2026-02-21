@@ -70,11 +70,20 @@ for f in .bashrc .bash_aliases .zshrc; do
 done
 
 # ── DNS Initialization ───────────────────────────────────────────────
-# The Dockerfile pre-seeds resolv.conf with Cloudflare/Google fallback.
-# Try to upgrade it with the actual Windows DNS servers.
+# Docker can't write /etc/resolv.conf during build, so the Dockerfile
+# stages a fallback at /etc/caelicode/resolv.conf.fallback. Apply it
+# first so DNS works immediately, then try to detect Windows DNS.
 DNSFILE="/etc/resolv.conf"
-log "Detecting Windows DNS servers..."
+FALLBACK="/etc/caelicode/resolv.conf.fallback"
 
+# Ensure resolv.conf exists with at least fallback DNS
+if [ ! -s "$DNSFILE" ] && [ -f "$FALLBACK" ]; then
+    cp "$FALLBACK" "$DNSFILE"
+    log "Applied fallback DNS (Cloudflare/Google)"
+fi
+
+# Try to upgrade with actual Windows DNS servers
+log "Detecting Windows DNS servers..."
 DNSLIST=$(run_with_timeout 15 /mnt/c/windows/system32/windowspowershell/v1.0/powershell.exe \
     -NoProfile -NonInteractive -Command \
     "Get-DnsClientServerAddress -AddressFamily IPv4 | Select-Object -ExpandProperty ServerAddresses | Sort-Object -Unique" \
@@ -87,7 +96,7 @@ if [ -n "$DNSLIST" ]; then
     done
     log "DNS configured with $(echo "$DNSLIST" | wc -w) Windows nameservers"
 else
-    log "Could not detect Windows DNS — keeping fallback (Cloudflare/Google)"
+    log "Could not detect Windows DNS — keeping fallback"
 fi
 
 log "First-login setup complete"
