@@ -122,10 +122,10 @@ To completely remove a CaeliCode WSL distro:
 wsl --unregister caelicode-sre
 
 # 2. Remove the install directory
-Remove-Item -Recurse -Force C:\wsl\caelicode
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\CaeliCode\wsl\sre"
 ```
 
-Replace `caelicode-sre` with your distro name (`caelicode-base`, `caelicode-dev`, or `caelicode-data`) and adjust the path if you chose a custom install directory.
+Replace `caelicode-sre` and `sre` with your profile name (`base`, `dev`, or `data`). If you used a custom install directory, adjust the path accordingly.
 
 To list all installed WSL distros and confirm removal:
 

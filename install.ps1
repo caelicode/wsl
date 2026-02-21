@@ -326,6 +326,9 @@ Write-Host ""
 Write-Host "  Set as default distro:" -ForegroundColor Yellow
 Write-Host "    wsl --set-default $DistroName" -ForegroundColor White
 Write-Host ""
-Write-Host "  Run health check after first launch:" -ForegroundColor Yellow
-Write-Host "    caelicode-health" -ForegroundColor White
+Write-Host "  Run health check (inside WSL):" -ForegroundColor Yellow
+Write-Host "    wsl -d $DistroName -- caelicode-health" -ForegroundColor White
+Write-Host ""
+Write-Host "  Open in VS Code (requires VS Code on Windows):" -ForegroundColor Yellow
+Write-Host "    wsl -d $DistroName -- code ." -ForegroundColor White
 Write-Host ""
