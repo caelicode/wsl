@@ -179,7 +179,8 @@ COPY profiles/data.toml /opt/mise/config/config.toml
 RUN mise install --env /opt/mise/config/config.toml && mise reshim
 
 # Install Python data tools via uv (after mise installs uv)
-RUN /opt/mise/shims/uv tool install dbt-core dbt-postgres 2>/dev/null || true
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+RUN /opt/mise/shims/uv tool install dbt-core dbt-postgres
 
 ARG VERSION=dev
 RUN echo "data" > /opt/caelicode/PROFILE && \
