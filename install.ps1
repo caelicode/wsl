@@ -1,4 +1,3 @@
-#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     CaeliCode WSL — One-line bootstrap installer.
@@ -8,50 +7,37 @@
     GitHub release. Handles WSL enablement, profile selection, checksum
     verification, and import — all in one command.
 
-.PARAMETER Profile
-    The distro profile to install: base, sre, dev, or data.
-    If omitted, presents an interactive menu.
-
-.PARAMETER InstallDir
-    Where to store the WSL virtual disk.
-    Default: $env:LOCALAPPDATA\CaeliCode\wsl
-
-.PARAMETER DistroName
-    The WSL distro registration name.
-    Default: caelicode-<profile>
-
-.PARAMETER SkipWslCheck
-    Skip WSL prerequisite checks (for pre-configured machines).
-
-.PARAMETER Force
-    Overwrite an existing distro with the same name.
-
 .EXAMPLE
-    # Interactive profile selection:
+    # Interactive (pipe-safe):
     irm https://raw.githubusercontent.com/caelicode/wsl/main/install.ps1 | iex
 
-    # Direct install with profile:
+    # Direct with parameters:
     .\install.ps1 -Profile sre
-
-    # Custom install location:
-    .\install.ps1 -Profile dev -InstallDir D:\wsl\caelicode
+    .\install.ps1 -Profile dev -InstallDir D:\wsl\caelicode -Force
 #>
 
-[CmdletBinding()]
-param(
-    [ValidateSet('base', 'sre', 'dev', 'data')]
-    [string]$Profile,
+# ── irm | iex compatible — no param() block ─────────────────────────
+# When run directly, these can be set via: .\install.ps1 -Profile sre
+# When piped, the interactive menu handles profile selection.
 
-    [string]$InstallDir,
+# Parse args manually for direct invocation compatibility
+$CaeliProfile  = $null
+$InstallDir    = $null
+$DistroName    = $null
+$SkipWslCheck  = $false
+$Force         = $false
 
-    [string]$DistroName,
+# Pick up args if run as a script (not piped)
+for ($i = 0; $i -lt $args.Count; $i++) {
+    switch ($args[$i]) {
+        '-Profile'      { $CaeliProfile = $args[++$i] }
+        '-InstallDir'   { $InstallDir   = $args[++$i] }
+        '-DistroName'   { $DistroName   = $args[++$i] }
+        '-SkipWslCheck' { $SkipWslCheck = $true }
+        '-Force'        { $Force        = $true }
+    }
+}
 
-    [switch]$SkipWslCheck,
-
-    [switch]$Force
-)
-
-Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'  # Speeds up Invoke-WebRequest
 
@@ -59,6 +45,7 @@ $ProgressPreference = 'SilentlyContinue'  # Speeds up Invoke-WebRequest
 $RepoOwner = 'caelicode'
 $RepoName  = 'wsl'
 $ApiBase   = "https://api.github.com/repos/$RepoOwner/$RepoName"
+$ValidProfiles = @('base', 'sre', 'dev', 'data')
 
 $ProfileDescriptions = @{
     base = 'Core tools (git, curl, jq, Python, mise)'
@@ -99,7 +86,19 @@ function Write-Banner {
 # ── 1. Banner ───────────────────────────────────────────────────────
 Write-Banner
 
-# ── 2. Check WSL prerequisites ──────────────────────────────────────
+# ── 2. Check admin privileges ────────────────────────────────────────
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator
+)
+if (-not $isAdmin) {
+    Write-Fail "This installer must be run as Administrator."
+    Write-Host ""
+    Write-Host "    Right-click PowerShell and select 'Run as Administrator'," -ForegroundColor Yellow
+    Write-Host "    then re-run the install command." -ForegroundColor Yellow
+    exit 1
+}
+
+# ── 3. Check WSL prerequisites ──────────────────────────────────────
 if (-not $SkipWslCheck) {
     Write-Step "Checking WSL prerequisites..."
 
@@ -131,14 +130,18 @@ if (-not $SkipWslCheck) {
     Write-Success "WSL2 is available"
 }
 
-# ── 3. Profile selection ────────────────────────────────────────────
-if (-not $Profile) {
+# ── 4. Profile selection ────────────────────────────────────────────
+if ($CaeliProfile -and $CaeliProfile -notin $ValidProfiles) {
+    Write-Fail "Invalid profile '$CaeliProfile'. Must be one of: $($ValidProfiles -join ', ')"
+    exit 1
+}
+
+if (-not $CaeliProfile) {
     Write-Step "Select a profile:"
     Write-Host ""
 
-    $profiles = @('base', 'sre', 'dev', 'data')
-    for ($i = 0; $i -lt $profiles.Count; $i++) {
-        $p = $profiles[$i]
+    for ($i = 0; $i -lt $ValidProfiles.Count; $i++) {
+        $p = $ValidProfiles[$i]
         $desc = $ProfileDescriptions[$p]
         Write-Host "    [$($i + 1)] " -ForegroundColor Cyan -NoNewline
         Write-Host "$p" -ForegroundColor White -NoNewline
@@ -150,24 +153,24 @@ if (-not $Profile) {
         $choice = Read-Host "    Enter choice (1-4)"
     } while ($choice -notmatch '^[1-4]$')
 
-    $Profile = $profiles[[int]$choice - 1]
+    $CaeliProfile = $ValidProfiles[[int]$choice - 1]
 }
 
-Write-Success "Profile: $Profile — $($ProfileDescriptions[$Profile])"
+Write-Success "Profile: $CaeliProfile — $($ProfileDescriptions[$CaeliProfile])"
 
-# ── 4. Configure paths ──────────────────────────────────────────────
+# ── 5. Configure paths ──────────────────────────────────────────────
 if (-not $InstallDir) {
-    $InstallDir = Join-Path $env:LOCALAPPDATA "CaeliCode\wsl\$Profile"
+    $InstallDir = Join-Path $env:LOCALAPPDATA "CaeliCode\wsl\$CaeliProfile"
 }
 
 if (-not $DistroName) {
-    $DistroName = "caelicode-$Profile"
+    $DistroName = "caelicode-$CaeliProfile"
 }
 
 Write-Step "Install directory: $InstallDir"
 Write-Step "Distro name: $DistroName"
 
-# ── 5. Check for existing distro ────────────────────────────────────
+# ── 6. Check for existing distro ────────────────────────────────────
 $existingDistros = wsl.exe --list --quiet 2>&1 | Out-String
 if ($existingDistros -match [regex]::Escape($DistroName)) {
     if ($Force) {
@@ -178,7 +181,7 @@ if ($existingDistros -match [regex]::Escape($DistroName)) {
         Write-Fail "Distro '$DistroName' already exists."
         Write-Host ""
         Write-Host "    To reinstall, run with -Force:" -ForegroundColor Yellow
-        Write-Host "      .\install.ps1 -Profile $Profile -Force" -ForegroundColor White
+        Write-Host "      .\install.ps1 -Profile $CaeliProfile -Force" -ForegroundColor White
         Write-Host ""
         Write-Host "    To update in-place instead:" -ForegroundColor Yellow
         Write-Host "      wsl -d $DistroName -- caelicode-update" -ForegroundColor White
@@ -186,7 +189,7 @@ if ($existingDistros -match [regex]::Escape($DistroName)) {
     }
 }
 
-# ── 6. Fetch latest release info ────────────────────────────────────
+# ── 7. Fetch latest release info ────────────────────────────────────
 Write-Step "Fetching latest release from GitHub..."
 
 try {
@@ -203,20 +206,20 @@ $version = $releaseInfo.tag_name
 Write-Success "Latest release: $version"
 
 # Find the tar.gz and sha256 assets
-$tarAsset = $releaseInfo.assets | Where-Object { $_.name -eq "caelicode-wsl-$Profile.tar.gz" }
-$shaAsset = $releaseInfo.assets | Where-Object { $_.name -eq "caelicode-wsl-$Profile.sha256" }
+$tarAsset = $releaseInfo.assets | Where-Object { $_.name -eq "caelicode-wsl-$CaeliProfile.tar.gz" }
+$shaAsset = $releaseInfo.assets | Where-Object { $_.name -eq "caelicode-wsl-$CaeliProfile.sha256" }
 
 if (-not $tarAsset) {
-    Write-Fail "Profile '$Profile' not found in release $version."
+    Write-Fail "Profile '$CaeliProfile' not found in release $version."
     Write-Host "    Available assets:" -ForegroundColor Yellow
     $releaseInfo.assets | ForEach-Object { Write-Host "      - $($_.name)" -ForegroundColor DarkGray }
     exit 1
 }
 
 $tarSizeMB = [math]::Round($tarAsset.size / 1MB, 1)
-Write-Step "Downloading caelicode-wsl-$Profile.tar.gz (${tarSizeMB}MB)..."
+Write-Step "Downloading caelicode-wsl-$CaeliProfile.tar.gz (${tarSizeMB}MB)..."
 
-# ── 7. Download to temp ─────────────────────────────────────────────
+# ── 8. Download to temp ─────────────────────────────────────────────
 $tempDir = Join-Path $env:TEMP "caelicode-wsl-install"
 if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
@@ -262,7 +265,7 @@ try {
     exit 1
 }
 
-# ── 8. Verify checksum ──────────────────────────────────────────────
+# ── 9. Verify checksum ──────────────────────────────────────────────
 Write-Step "Verifying SHA256 checksum..."
 
 $expectedHash = (Get-Content $shaPath -Raw).Trim().Split(' ')[0].ToUpper()
@@ -280,7 +283,7 @@ if ($expectedHash -ne $actualHash) {
 
 Write-Success "Checksum verified: $($actualHash.Substring(0, 16))..."
 
-# ── 9. Create install directory and import ───────────────────────────
+# ── 10. Create install directory and import ──────────────────────────
 Write-Step "Importing WSL distro '$DistroName'..."
 
 if (-not (Test-Path $InstallDir)) {
@@ -296,17 +299,17 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Success "Distro imported successfully"
 
-# ── 10. Cleanup temp files ───────────────────────────────────────────
+# ── 11. Cleanup temp files ───────────────────────────────────────────
 Remove-Item $tempDir -Recurse -Force
 Write-Success "Cleaned up temp files"
 
-# ── 11. First launch info ───────────────────────────────────────────
+# ── 12. First launch info ───────────────────────────────────────────
 Write-Host ""
 Write-Host "  ╔═══════════════════════════════════════════╗" -ForegroundColor Green
 Write-Host "  ║       Installation Complete!               ║" -ForegroundColor Green
 Write-Host "  ╚═══════════════════════════════════════════╝" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Profile:  " -NoNewline; Write-Host $Profile -ForegroundColor Cyan
+Write-Host "  Profile:  " -NoNewline; Write-Host $CaeliProfile -ForegroundColor Cyan
 Write-Host "  Version:  " -NoNewline; Write-Host $version -ForegroundColor Cyan
 Write-Host "  Distro:   " -NoNewline; Write-Host $DistroName -ForegroundColor Cyan
 Write-Host "  Location: " -NoNewline; Write-Host $InstallDir -ForegroundColor Cyan
