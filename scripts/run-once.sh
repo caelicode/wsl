@@ -70,29 +70,24 @@ for f in .bashrc .bash_aliases .zshrc; do
 done
 
 # ── DNS Initialization ───────────────────────────────────────────────
+# The Dockerfile pre-seeds resolv.conf with Cloudflare/Google fallback.
+# Try to upgrade it with the actual Windows DNS servers.
 DNSFILE="/etc/resolv.conf"
+log "Detecting Windows DNS servers..."
 
-if [ -s "$DNSFILE" ]; then
-    log "DNS already configured in ${DNSFILE}"
+DNSLIST=$(run_with_timeout 15 /mnt/c/windows/system32/windowspowershell/v1.0/powershell.exe \
+    -NoProfile -NonInteractive -Command \
+    "Get-DnsClientServerAddress -AddressFamily IPv4 | Select-Object -ExpandProperty ServerAddresses | Sort-Object -Unique" \
+    | tr -d '\r' || true)
+
+if [ -n "$DNSLIST" ]; then
+    : > "$DNSFILE"
+    for ip in $DNSLIST; do
+        echo "nameserver $ip" >> "$DNSFILE"
+    done
+    log "DNS configured with $(echo "$DNSLIST" | wc -w) Windows nameservers"
 else
-    log "Initializing DNS from Windows configuration..."
-    DNSLIST=$(run_with_timeout 15 /mnt/c/windows/system32/windowspowershell/v1.0/powershell.exe \
-        -NoProfile -NonInteractive -Command \
-        "Get-DnsClientServerAddress -AddressFamily IPv4 | Select-Object -ExpandProperty ServerAddresses | Sort-Object -Unique" \
-        | tr -d '\r' || true)
-
-    if [ -n "$DNSLIST" ]; then
-        : > "$DNSFILE"
-        for ip in $DNSLIST; do
-            echo "nameserver $ip" >> "$DNSFILE"
-        done
-        log "DNS configured with $(echo "$DNSLIST" | wc -w) nameservers"
-    else
-        # Fallback to well-known public DNS
-        echo "nameserver 1.1.1.1" > "$DNSFILE"
-        echo "nameserver 8.8.8.8" >> "$DNSFILE"
-        warn "Could not detect Windows DNS — using Cloudflare/Google fallback"
-    fi
+    log "Could not detect Windows DNS — keeping fallback (Cloudflare/Google)"
 fi
 
 log "First-login setup complete"

@@ -145,6 +145,22 @@ RUN mkdir -p /etc/systemd/system/multi-user.target.wants && \
     ln -sf /etc/systemd/system/dns-watch.service /etc/systemd/system/multi-user.target.wants/dns-watch.service && \
     ln -sf /etc/systemd/system/ssh-bridge.service /etc/systemd/system/multi-user.target.wants/ssh-bridge.service
 
+# ── Persist environment for WSL ──────────────────────────────────────
+# Docker ENV is lost on `docker export` → `wsl --import`. Write PATH and
+# other critical vars to /etc/environment (read by WSL on boot) and
+# /etc/profile.d/ (sourced by login shells) so tools are always available.
+RUN echo 'PATH="/opt/mise/bin:/opt/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/environment && \
+    echo 'MISE_DATA_DIR="/opt/mise"' >> /etc/environment && \
+    echo 'MISE_CONFIG_DIR="/opt/mise/config"' >> /etc/environment && \
+    echo 'STARSHIP_CONFIG="/etc/caelicode/starship.toml"' >> /etc/environment
+COPY config/caelicode-env.sh /etc/profile.d/caelicode-env.sh
+
+# ── Pre-seed DNS fallback ────────────────────────────────────────────
+# WSL generateResolvConf is disabled. Provide sane defaults so DNS works
+# immediately. The run-once service upgrades this with Windows DNS later.
+RUN echo "nameserver 1.1.1.1" > /etc/resolv.conf && \
+    echo "nameserver 8.8.8.8" >> /etc/resolv.conf
+
 # ── Cleanup ──────────────────────────────────────────────────────────
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 

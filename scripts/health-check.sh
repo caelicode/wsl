@@ -6,6 +6,12 @@
 
 set -uo pipefail
 
+# Ensure mise shims are in PATH — Docker ENV is lost after wsl --import,
+# and `wsl -- command` runs a non-interactive shell (no profile.d sourcing).
+if [ -d /opt/mise/shims ] && [[ ":$PATH:" != *":/opt/mise/shims:"* ]]; then
+    export PATH="/opt/mise/bin:/opt/mise/shims:$PATH"
+fi
+
 QUIET=false
 [ "${1:-}" = "--quiet" ] && QUIET=true
 
