@@ -1,0 +1,9 @@
+[Unit]
+Description=CaeliCode DNS watcher timer
+
+[Timer]
+OnBootSec=5
+OnUnitActiveSec=5
+
+[Install]
+WantedBy=timers.target

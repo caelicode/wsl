@@ -1,0 +1,30 @@
+{
+  "name": "caelicode-wsl",
+  "version": "0.0.0-semantically-released",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/caelicode/wsl.git"
+  },
+  "release": {
+    "branches": ["main"],
+    "plugins": [
+      ["@semantic-release/commit-analyzer", {
+        "preset": "conventionalcommits",
+        "releaseRules": [
+          { "type": "feat", "release": "minor" },
+          { "type": "fix", "release": "patch" },
+          { "type": "perf", "release": "patch" },
+          { "type": "deps", "release": "patch" }
+        ]
+      }],
+      ["@semantic-release/release-notes-generator", {
+        "preset": "conventionalcommits"
+      }],
+      ["@semantic-release/github", {
+        "successComment": false,
+        "failTitle": false
+      }]
+    ]
+  }
+}

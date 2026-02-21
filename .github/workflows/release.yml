@@ -1,0 +1,159 @@
+# CaeliCode WSL — Release Pipeline
+# Triggered by semantic-release tags. Builds all profiles, generates checksums
+# and SBOM, publishes GitHub Release with all assets.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: true
+      matrix:
+        profile: [base, sre, dev, data]
+        include:
+          - profile: base
+            target: base-image
+          - profile: sre
+            target: sre-image
+          - profile: dev
+            target: dev-image
+          - profile: data
+            target: data-image
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build ${{ matrix.profile }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          build-args: VERSION=${{ steps.version.outputs.tag }}
+          tags: caelicode-wsl:${{ matrix.profile }}
+          load: true
+
+      - name: Run tests
+        run: |
+          TEST_SCRIPT="test-${{ matrix.profile }}.sh"
+          docker run --rm caelicode-wsl:${{ matrix.profile }} \
+            bash /opt/caelicode/test/"$TEST_SCRIPT"
+
+      - name: Export tar
+        run: |
+          mkdir -p dist
+          CONTAINER=$(docker run --privileged -dt caelicode-wsl:${{ matrix.profile }} bash)
+          docker export "$CONTAINER" > dist/caelicode-wsl-${{ matrix.profile }}.tar
+          docker rm -f "$CONTAINER"
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum caelicode-wsl-${{ matrix.profile }}.tar > caelicode-wsl-${{ matrix.profile }}.sha256
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.profile }}
+          path: dist/
+
+  publish:
+    name: Publish Release
+    needs: release
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SBOM
+        run: |
+          python3 -c "
+          import json, tomllib, pathlib
+
+          sbom = {
+              'bomFormat': 'CycloneDX',
+              'specVersion': '1.5',
+              'version': '${GITHUB_REF#refs/tags/}',
+              'components': []
+          }
+
+          for toml_file in sorted(pathlib.Path('profiles').glob('*.toml')):
+              with open(toml_file, 'rb') as f:
+                  data = tomllib.load(f)
+              profile = toml_file.stem
+              for tool, version in data.get('tools', {}).items():
+                  sbom['components'].append({
+                      'type': 'application',
+                      'name': tool,
+                      'version': version,
+                      'group': f'caelicode-wsl/{profile}'
+                  })
+
+          print(json.dumps(sbom, indent=2))
+          " > dist/sbom.json
+
+      - name: Merge checksums
+        run: |
+          cat dist/*.sha256 > dist/checksums.txt
+
+      - name: Extract version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: CaeliCode WSL ${{ steps.version.outputs.tag }}
+          body: |
+            ## CaeliCode WSL ${{ steps.version.outputs.tag }}
+
+            ### Profile images
+            | Profile | Description |
+            |---------|-------------|
+            | `caelicode-wsl-base.tar` | Core tools (git, curl, jq, Python, mise) |
+            | `caelicode-wsl-sre.tar` | SRE/Platform (kubectl, helm, terraform, k9s, argocd, trivy) |
+            | `caelicode-wsl-dev.tar` | Development (Node.js, Go, Rust, podman, uv) |
+            | `caelicode-wsl-data.tar` | Data Engineering (Python, dbt, PostgreSQL client, uv) |
+
+            ### Install
+            ```powershell
+            wsl --import caelicode-sre C:\wsl\caelicode caelicode-wsl-sre.tar
+            wsl -d caelicode-sre
+            ```
+
+            ### Verify
+            ```bash
+            caelicode-health
+            ```
+
+            See [Getting Started](docs/getting-started.md) for full instructions.
+          files: |
+            dist/*.tar
+            dist/*.sha256
+            dist/checksums.txt
+            dist/sbom.json
+          draft: false
+          prerelease: false

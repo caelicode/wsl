@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# CaeliCode WSL — In-place updater
+# Updates scripts, config templates, and tool manifests from the latest GitHub release
+# without reimporting the entire WSL distro. User home directories are never touched.
+#
+# Usage:
+#   caelicode-update              # Update to latest
+#   caelicode-update --dry-run    # Show what would change
+#   caelicode-update --version    # Show current version
+
+set -euo pipefail
+
+REPO="caelicode/wsl"
+INSTALL_DIR="/opt/caelicode"
+VERSION_FILE="${INSTALL_DIR}/VERSION"
+TEMP_DIR=$(mktemp -d)
+
+# shellcheck disable=SC2064
+trap "rm -rf $TEMP_DIR" EXIT
+
+log() { echo "[caelicode-update] $*"; }
+err() { echo "[caelicode-update] ERROR: $*" >&2; }
+
+# ── Parse Arguments ──────────────────────────────────────────────────
+DRY_RUN=false
+SHOW_VERSION=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run)   DRY_RUN=true; shift ;;
+        --version)   SHOW_VERSION=true; shift ;;
+        -h|--help)
+            echo "Usage: caelicode-update [--dry-run] [--version]"
+            echo ""
+            echo "Updates CaeliCode WSL scripts and config from the latest GitHub release."
+            echo "Your home directory and personal settings are never modified."
+            echo ""
+            echo "Options:"
+            echo "  --dry-run   Show what would change without applying"
+            echo "  --version   Show current installed version"
+            exit 0
+            ;;
+        *)
+            err "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# ── Version Check ────────────────────────────────────────────────────
+CURRENT_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || echo "unknown")
+
+if $SHOW_VERSION; then
+    echo "CaeliCode WSL ${CURRENT_VERSION}"
+    echo "Profile: $(cat "${INSTALL_DIR}/PROFILE" 2>/dev/null || echo "unknown")"
+    exit 0
+fi
+
+log "Current version: ${CURRENT_VERSION}"
+
+# Fetch latest release info
+RELEASE_JSON=$(curl -sf "https://api.github.com/repos/${REPO}/releases/latest" || true)
+
+if [ -z "$RELEASE_JSON" ]; then
+    err "Failed to fetch release info from GitHub"
+    err "Check your internet connection or try again later"
+    exit 1
+fi
+
+LATEST_VERSION=$(echo "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)
+CHANGELOG=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body','No changelog available'))" 2>/dev/null || echo "")
+
+if [ -z "$LATEST_VERSION" ]; then
+    err "Could not determine latest version"
+    exit 1
+fi
+
+if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+    log "Already at latest version: ${CURRENT_VERSION}"
+    exit 0
+fi
+
+log "Update available: ${CURRENT_VERSION} → ${LATEST_VERSION}"
+
+if [ -n "$CHANGELOG" ]; then
+    echo ""
+    echo "Changelog:"
+    echo "──────────"
+    echo "$CHANGELOG" | head -30
+    echo ""
+fi
+
+if $DRY_RUN; then
+    log "[DRY RUN] Would update from ${CURRENT_VERSION} to ${LATEST_VERSION}"
+    exit 0
+fi
+
+# ── Download Update Bundle ───────────────────────────────────────────
+BUNDLE_URL="https://github.com/${REPO}/releases/download/${LATEST_VERSION}/caelicode-update-${LATEST_VERSION}.tar.gz"
+CHECKSUM_URL="https://github.com/${REPO}/releases/download/${LATEST_VERSION}/checksums.txt"
+
+log "Downloading update bundle..."
+cd "$TEMP_DIR"
+
+if ! curl -sfL -o "update.tar.gz" "$BUNDLE_URL"; then
+    err "Failed to download update bundle"
+    err "URL: ${BUNDLE_URL}"
+    exit 1
+fi
+
+# Verify checksum
+if curl -sfL -o "checksums.txt" "$CHECKSUM_URL"; then
+    if grep "update" checksums.txt | sha256sum -c --quiet 2>/dev/null; then
+        log "Checksum verified"
+    else
+        err "Checksum verification failed — aborting"
+        exit 1
+    fi
+else
+    log "Warning: Could not verify checksum (checksums.txt not found)"
+fi
+
+# ── Apply Update ─────────────────────────────────────────────────────
+log "Applying update..."
+tar xzf update.tar.gz
+
+# Update scripts
+if [ -d "scripts" ]; then
+    sudo cp -r scripts/* "${INSTALL_DIR}/scripts/"
+    sudo chmod +x "${INSTALL_DIR}/scripts/"*.sh 2>/dev/null || true
+    sudo chmod +x "${INSTALL_DIR}/scripts/caelicode-update" 2>/dev/null || true
+fi
+
+# Update profiles
+if [ -d "profiles" ]; then
+    sudo cp -r profiles/* "${INSTALL_DIR}/profiles/"
+fi
+
+# Update version marker
+echo "$LATEST_VERSION" | sudo tee "$VERSION_FILE" > /dev/null
+
+log "Updated to ${LATEST_VERSION}"
+log "Restart your shell or run: source ~/.bashrc"

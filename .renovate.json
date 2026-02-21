@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "labels": ["dependencies"],
+  "schedule": ["before 6am on Monday"],
+  "regexManagers": [
+    {
+      "fileMatch": ["profiles/.*\\.toml$"],
+      "matchStrings": [
+        "(?<depName>kubectl|helm|terraform|k9s|argocd|trivy|node|go|rust|uv|python)\\s*=\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "lookupNameTemplate": "{{#if (equals depName 'kubectl')}}kubernetes/kubernetes{{/if}}{{#if (equals depName 'helm')}}helm/helm{{/if}}{{#if (equals depName 'terraform')}}hashicorp/terraform{{/if}}{{#if (equals depName 'k9s')}}derailed/k9s{{/if}}{{#if (equals depName 'argocd')}}argoproj/argo-cd{{/if}}{{#if (equals depName 'trivy')}}aquasecurity/trivy{{/if}}{{#if (equals depName 'node')}}nodejs/node{{/if}}{{#if (equals depName 'go')}}golang/go{{/if}}{{#if (equals depName 'rust')}}rust-lang/rust{{/if}}{{#if (equals depName 'uv')}}astral-sh/uv{{/if}}{{#if (equals depName 'python')}}python/cpython{{/if}}"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["regex"],
+      "groupName": "tool versions",
+      "automerge": false,
+      "commitMessagePrefix": "deps:"
+    }
+  ]
+}

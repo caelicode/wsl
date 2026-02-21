@@ -1,0 +1,35 @@
+# CaeliCode WSL Configuration
+# Edit this file to customize your environment. Changes take effect on next login.
+# Location: /etc/caelicode/config.yaml
+
+branding:
+  # MOTD banner displayed on login
+  motd_enabled: true
+  motd_text: "CaeliCode WSL"
+
+  # PS1 prompt features
+  prompt_git_branch: true
+  prompt_k8s_context: true
+
+  # Prompt colors (ANSI escape codes)
+  prompt_colors:
+    user: "32"        # green
+    host: "34"        # blue
+    path: "33"        # yellow
+    git: "35"         # magenta
+    k8s: "36"         # cyan
+
+dns:
+  # Dynamic DNS watcher (detects VPN/network changes)
+  watch_enabled: true
+  watch_interval: 5   # seconds
+
+proxy:
+  # Auto-detect Windows proxy settings
+  detect_enabled: true
+  # Merge Windows root CA certs into Linux trust store
+  merge_ca_certs: true
+
+ssh:
+  # Bridge Windows SSH agent to WSL via socat
+  agent_forwarding: true

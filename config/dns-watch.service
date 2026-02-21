@@ -1,0 +1,12 @@
+[Unit]
+Description=CaeliCode DNS watcher (VPN/network aware)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/caelicode/scripts/dns-watch.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
