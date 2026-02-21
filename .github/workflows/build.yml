@@ -88,9 +88,9 @@ jobs:
         run: |
           mkdir -p images
           CONTAINER=$(docker run --privileged -dt caelicode-wsl:${{ matrix.profile }} bash)
-          docker export "$CONTAINER" > images/caelicode-wsl-${{ matrix.profile }}.tar
+          docker export "$CONTAINER" | gzip > images/caelicode-wsl-${{ matrix.profile }}.tar.gz
           docker rm -f "$CONTAINER"
-          sha256sum images/caelicode-wsl-${{ matrix.profile }}.tar > images/caelicode-wsl-${{ matrix.profile }}.sha256
+          sha256sum images/caelicode-wsl-${{ matrix.profile }}.tar.gz > images/caelicode-wsl-${{ matrix.profile }}.sha256
 
       - name: Upload build artifact
         if: github.ref == 'refs/heads/main'

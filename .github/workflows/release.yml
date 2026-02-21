@@ -59,13 +59,13 @@ jobs:
         run: |
           mkdir -p dist
           CONTAINER=$(docker run --privileged -dt caelicode-wsl:${{ matrix.profile }} bash)
-          docker export "$CONTAINER" > dist/caelicode-wsl-${{ matrix.profile }}.tar
+          docker export "$CONTAINER" | gzip > dist/caelicode-wsl-${{ matrix.profile }}.tar.gz
           docker rm -f "$CONTAINER"
 
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum caelicode-wsl-${{ matrix.profile }}.tar > caelicode-wsl-${{ matrix.profile }}.sha256
+          sha256sum caelicode-wsl-${{ matrix.profile }}.tar.gz > caelicode-wsl-${{ matrix.profile }}.sha256
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
@@ -134,14 +134,14 @@ jobs:
             ### Profile images
             | Profile | Description |
             |---------|-------------|
-            | `caelicode-wsl-base.tar` | Core tools (git, curl, jq, Python, mise) |
-            | `caelicode-wsl-sre.tar` | SRE/Platform (kubectl, helm, terraform, k9s, argocd, trivy) |
-            | `caelicode-wsl-dev.tar` | Development (Node.js, Go, Rust, podman, uv) |
-            | `caelicode-wsl-data.tar` | Data Engineering (Python, dbt, PostgreSQL client, uv) |
+            | `caelicode-wsl-base.tar.gz` | Core tools (git, curl, jq, Python, mise) |
+            | `caelicode-wsl-sre.tar.gz` | SRE/Platform (kubectl, helm, terraform, k9s, argocd, trivy) |
+            | `caelicode-wsl-dev.tar.gz` | Development (Node.js, Go, Rust, podman, uv) |
+            | `caelicode-wsl-data.tar.gz` | Data Engineering (Python, dbt, PostgreSQL client, uv) |
 
             ### Install
             ```powershell
-            wsl --import caelicode-sre C:\wsl\caelicode caelicode-wsl-sre.tar
+            wsl --import caelicode-sre C:\wsl\caelicode caelicode-wsl-sre.tar.gz
             wsl -d caelicode-sre
             ```
 
@@ -152,7 +152,7 @@ jobs:
 
             See [Getting Started](docs/getting-started.md) for full instructions.
           files: |
-            dist/*.tar
+            dist/*.tar.gz
             dist/*.sha256
             dist/checksums.txt
             dist/sbom.json
