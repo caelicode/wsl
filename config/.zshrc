@@ -3,20 +3,15 @@
 # If not running interactively, don't do anything
 [[ -o interactive ]] || return
 
-# ── Oh My Zsh ──────────────────────────────────────────────────────
-export ZSH="/opt/oh-my-zsh"
-ZSH_THEME=""  # Disabled — using Starship prompt instead
-DISABLE_AUTO_UPDATE=true
+# ── Helper: timeout-protected eval ───────────────────────────────
+# Prevents any single init command from hanging the shell.
+_timed_eval() {
+    local out
+    out=$(timeout 5 "$@" 2>/dev/null) && eval "$out"
+}
 
-# Only load plugins that exist
-plugins=(git)
-[[ -d "$ZSH/custom/plugins/zsh-autosuggestions" ]] && plugins+=(zsh-autosuggestions)
-[[ -d "$ZSH/custom/plugins/zsh-syntax-highlighting" ]] && plugins+=(zsh-syntax-highlighting)
-command -v kubectl &>/dev/null && plugins+=(kubectl)
-command -v terraform &>/dev/null && plugins+=(terraform)
-command -v docker &>/dev/null && plugins+=(docker)
-
-source "$ZSH/oh-my-zsh.sh"
+# ── PATH (must come first) ───────────────────────────────────────
+export PATH="/opt/mise/bin:/opt/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 # ── History ────────────────────────────────────────────────────────
 HISTSIZE=10000
@@ -27,31 +22,48 @@ setopt HIST_IGNORE_SPACE
 setopt SHARE_HISTORY
 setopt APPEND_HISTORY
 
+# ── Oh My Zsh ──────────────────────────────────────────────────────
+export ZSH="/opt/oh-my-zsh"
+ZSH_THEME=""  # Disabled — using Starship prompt instead
+DISABLE_AUTO_UPDATE=true
+DISABLE_MAGIC_FUNCTIONS=true
+
+# Only load lightweight plugins — skip kubectl/terraform/docker
+# as they run slow completion init on every shell start
+plugins=(git)
+[[ -d "$ZSH/custom/plugins/zsh-autosuggestions" ]] && plugins+=(zsh-autosuggestions)
+[[ -d "$ZSH/custom/plugins/zsh-syntax-highlighting" ]] && plugins+=(zsh-syntax-highlighting)
+
+if [[ -f "$ZSH/oh-my-zsh.sh" ]]; then
+    source "$ZSH/oh-my-zsh.sh"
+fi
+
 # ── Mise (Tool Version Manager) ───────────────────────────────────
-export PATH="/opt/mise/bin:/opt/mise/shims:$PATH"
+# Shims already provide tool access via PATH. `mise activate` adds
+# directory-based auto-switching hooks — skip if it hangs.
 if command -v mise &>/dev/null; then
-    eval "$(mise activate zsh)"
+    _timed_eval mise activate zsh
 fi
 
 # ── Starship Prompt ───────────────────────────────────────────────
 export STARSHIP_CONFIG="/etc/caelicode/starship.toml"
 if command -v starship &>/dev/null; then
-    eval "$(starship init zsh)"
+    _timed_eval starship init zsh
 fi
 
 # ── Zoxide (smart cd) ─────────────────────────────────────────────
 if command -v zoxide &>/dev/null; then
-    eval "$(zoxide init zsh)"
+    _timed_eval zoxide init zsh
 fi
 
 # ── Direnv ─────────────────────────────────────────────────────────
 if command -v direnv &>/dev/null; then
-    eval "$(direnv hook zsh)"
+    _timed_eval direnv hook zsh
 fi
 
 # ── FZF Integration ───────────────────────────────────────────────
 if command -v fzf &>/dev/null; then
-    source <(fzf --zsh 2>/dev/null) || true
+    _timed_eval fzf --zsh
 fi
 
 # ── Aliases ────────────────────────────────────────────────────────
@@ -78,3 +90,6 @@ if [ -z "$CAELICODE_MOTD_SHOWN" ]; then
     echo -e "\033[1;36m  ╚═══════════════════════════════════════════╝\033[0m"
     echo ""
 fi
+
+# Cleanup
+unfunction _timed_eval 2>/dev/null
