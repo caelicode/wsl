@@ -12,18 +12,18 @@ check_version() {
     local ver
     ver=$($cmd 2>&1 | head -1) || true
     if [ -n "$ver" ]; then
-        echo "  ✓ ${name}: ${ver}"; ((PASS++))
+        echo "  ✓ ${name}: ${ver}"; PASS=$((PASS + 1))
     else
-        echo "  ✗ ${name}: not found"; ((FAIL++))
+        echo "  ✗ ${name}: not found"; FAIL=$((FAIL + 1))
     fi
 }
 
 check() {
     local name="$1"; shift
     if "$@" >/dev/null 2>&1; then
-        echo "  ✓ ${name}"; ((PASS++))
+        echo "  ✓ ${name}"; PASS=$((PASS + 1))
     else
-        echo "  ✗ ${name}"; ((FAIL++))
+        echo "  ✗ ${name}"; FAIL=$((FAIL + 1))
     fi
 }
 
@@ -37,9 +37,9 @@ check "dbt installed" command -v dbt
 # Profile marker
 PROFILE=$(cat /opt/caelicode/PROFILE 2>/dev/null || echo "unknown")
 if [ "$PROFILE" = "data" ]; then
-    echo "  ✓ Profile marker: data"; ((PASS++))
+    echo "  ✓ Profile marker: data"; PASS=$((PASS + 1))
 else
-    echo "  ✗ Profile marker: expected 'data', got '${PROFILE}'"; ((FAIL++))
+    echo "  ✗ Profile marker: expected 'data', got '${PROFILE}'"; FAIL=$((FAIL + 1))
 fi
 
 echo ""

@@ -12,9 +12,9 @@ check_version() {
     local ver
     ver=$($cmd 2>&1 | head -1) || true
     if [ -n "$ver" ]; then
-        echo "  ✓ ${name}: ${ver}"; ((PASS++))
+        echo "  ✓ ${name}: ${ver}"; PASS=$((PASS + 1))
     else
-        echo "  ✗ ${name}: not found"; ((FAIL++))
+        echo "  ✗ ${name}: not found"; FAIL=$((FAIL + 1))
     fi
 }
 
@@ -29,9 +29,9 @@ check_version "podman" "podman --version"
 # Profile marker
 PROFILE=$(cat /opt/caelicode/PROFILE 2>/dev/null || echo "unknown")
 if [ "$PROFILE" = "dev" ]; then
-    echo "  ✓ Profile marker: dev"; ((PASS++))
+    echo "  ✓ Profile marker: dev"; PASS=$((PASS + 1))
 else
-    echo "  ✗ Profile marker: expected 'dev', got '${PROFILE}'"; ((FAIL++))
+    echo "  ✗ Profile marker: expected 'dev', got '${PROFILE}'"; FAIL=$((FAIL + 1))
 fi
 
 echo ""

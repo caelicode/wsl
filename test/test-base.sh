@@ -7,9 +7,9 @@ PASS=0; FAIL=0
 check() {
     local name="$1"; shift
     if "$@" >/dev/null 2>&1; then
-        echo "  ✓ ${name}"; ((PASS++))
+        echo "  ✓ ${name}"; PASS=$((PASS + 1))
     else
-        echo "  ✗ ${name}"; ((FAIL++))
+        echo "  ✗ ${name}"; FAIL=$((FAIL + 1))
     fi
 }
 
@@ -18,9 +18,9 @@ check_version() {
     local ver
     ver=$($cmd 2>&1 | head -1) || true
     if [ -n "$ver" ]; then
-        echo "  ✓ ${name}: ${ver}"; ((PASS++))
+        echo "  ✓ ${name}: ${ver}"; PASS=$((PASS + 1))
     else
-        echo "  ✗ ${name}: not found"; ((FAIL++))
+        echo "  ✗ ${name}: not found"; FAIL=$((FAIL + 1))
     fi
 }
 
