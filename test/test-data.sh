@@ -36,7 +36,7 @@ check_version "psql" "psql --version"
 check_version "sqlite3" "sqlite3 --version"
 check_version "duckdb" "duckdb --version"
 check "dbt installed" command -v dbt
-check "jupyter installed" command -v jupyter
+check "jupyter-lab installed" command -v jupyter-lab
 
 # Redis client
 check_version "redis-cli" "redis-cli --version"

@@ -218,7 +218,7 @@ RUN mise install --env /opt/mise/config/config.toml && mise reshim
 # Install Python data tools via uv (after mise installs uv)
 ENV UV_TOOL_BIN_DIR=/usr/local/bin
 RUN /opt/mise/shims/uv tool install dbt-core --with dbt-postgres && \
-    /opt/mise/shims/uv tool install jupyterlab --with jupyter
+    /opt/mise/shims/uv tool install jupyterlab
 
 ARG VERSION=dev
 RUN echo "data" > /opt/caelicode/PROFILE && \
