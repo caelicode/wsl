@@ -32,17 +32,30 @@ Built on Ubuntu 24.04 with systemd support.
 
 ## Quick Start
 
-### Install from release
+### One-line install (recommended)
+
+Open PowerShell **as Administrator** and run:
 
 ```powershell
-# Download the tar for your profile
-Invoke-WebRequest -Uri https://github.com/caelicode/wsl/releases/latest/download/caelicode-wsl-sre.tar -OutFile caelicode-wsl-sre.tar
+irm https://raw.githubusercontent.com/caelicode/wsl/main/install.ps1 | iex
+```
 
-# Verify checksum
-certutil -hashfile caelicode-wsl-sre.tar SHA256
+This presents an interactive profile menu, downloads the latest release, verifies the checksum, and imports the distro — all in one command.
+
+To install a specific profile non-interactively:
+
+```powershell
+.\install.ps1 -Profile sre
+```
+
+### Manual install
+
+```powershell
+# Download the tar.gz for your profile
+Invoke-WebRequest -Uri https://github.com/caelicode/wsl/releases/latest/download/caelicode-wsl-sre.tar.gz -OutFile caelicode-wsl-sre.tar.gz
 
 # Import into WSL
-wsl --import caelicode-sre C:\wsl\caelicode caelicode-wsl-sre.tar
+wsl --import caelicode-sre C:\wsl\caelicode caelicode-wsl-sre.tar.gz
 
 # Launch
 wsl -d caelicode-sre

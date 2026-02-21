@@ -8,23 +8,46 @@
 
 ## Installation
 
-### Option 1: Download from GitHub Releases
+### Option 1: One-line bootstrap (recommended)
+
+Open PowerShell **as Administrator** and run:
+
+```powershell
+irm https://raw.githubusercontent.com/caelicode/wsl/main/install.ps1 | iex
+```
+
+The installer will:
+- Check WSL2 prerequisites
+- Present an interactive profile menu
+- Download the latest release with progress
+- Verify SHA256 checksum
+- Import the distro into WSL
+
+For non-interactive installs (e.g. scripted deployment):
+
+```powershell
+.\install.ps1 -Profile sre -InstallDir D:\wsl\caelicode -Force
+```
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `-Profile` | `base`, `sre`, `dev`, or `data` | Interactive menu |
+| `-InstallDir` | Where to store the WSL virtual disk | `%LOCALAPPDATA%\CaeliCode\wsl\<profile>` |
+| `-DistroName` | WSL registration name | `caelicode-<profile>` |
+| `-SkipWslCheck` | Skip WSL prerequisite checks | `$false` |
+| `-Force` | Overwrite existing distro with same name | `$false` |
+
+### Option 2: Manual download
 
 1. Go to [Releases](https://github.com/caelicode/wsl/releases/latest)
-2. Download the `.tar` file for your profile
-3. Download the matching `.sha256` file and verify:
+2. Download the `.tar.gz` file for your profile
+3. Import into WSL:
 
 ```powershell
-certutil -hashfile caelicode-wsl-sre.tar SHA256
+wsl --import caelicode-sre C:\wsl\caelicode caelicode-wsl-sre.tar.gz
 ```
 
-4. Import into WSL:
-
-```powershell
-wsl --import caelicode-sre C:\wsl\caelicode caelicode-wsl-sre.tar
-```
-
-5. Launch:
+4. Launch:
 
 ```powershell
 wsl -d caelicode-sre
