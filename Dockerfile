@@ -154,13 +154,6 @@ RUN echo 'PATH="/opt/mise/bin:/opt/mise/shims:/usr/local/sbin:/usr/local/bin:/us
     echo 'MISE_CONFIG_DIR="/opt/mise/config"' >> /etc/environment && \
     echo 'STARSHIP_CONFIG="/etc/caelicode/starship.toml"' >> /etc/environment
 COPY config/caelicode-env.sh /etc/profile.d/00-caelicode-env.sh
-COPY config/caelicode-init.sh /etc/profile.d/99-caelicode-init.sh
-
-# ── Pre-seed DNS fallback ────────────────────────────────────────────
-# WSL generateResolvConf is disabled. Provide sane defaults so DNS works
-# immediately. The profile.d init script upgrades to Windows DNS on first
-# login. Docker blocks writes to /etc/resolv.conf, so we stage it here.
-RUN printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/caelicode/resolv.conf.fallback
 
 # ── Cleanup ──────────────────────────────────────────────────────────
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

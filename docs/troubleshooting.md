@@ -4,19 +4,19 @@
 
 **Symptom:** `ping github.com` or `curl` commands fail with "Could not resolve host".
 
-**Fix:** The DNS watcher may not have run yet. Trigger it manually:
-
-```bash
-sudo /opt/caelicode/scripts/dns-watch.sh
-```
-
-Check what's in `/etc/resolv.conf`:
+**Fix:** Check what's in `/etc/resolv.conf`:
 
 ```bash
 cat /etc/resolv.conf
 ```
 
-If it's empty or has wrong nameservers, the Windows DNS query may have failed. Set fallback manually:
+WSL auto-generates this file on each boot. If it's empty or has wrong nameservers, try restarting WSL from PowerShell:
+
+```powershell
+wsl --shutdown
+```
+
+Then relaunch. If the problem persists, set DNS manually:
 
 ```bash
 echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8" | sudo tee /etc/resolv.conf
@@ -26,31 +26,13 @@ echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8" | sudo tee /etc/resolv.conf
 
 **Symptom:** DNS worked before connecting to VPN, now it doesn't.
 
-**Expected behavior:** The `dns-watch` timer polls every 5 seconds and should detect the change automatically. If it doesn't:
+**Fix:** Restart WSL so it picks up the new DNS settings:
 
-```bash
-# Check the timer is active
-systemctl status dns-watch.timer
-
-# Restart it
-sudo systemctl restart dns-watch.timer
+```powershell
+wsl --shutdown
 ```
 
-## SSH Keys Not Available
-
-**Symptom:** `ssh-add -l` says "Could not open a connection to your authentication agent" or shows no keys.
-
-**Check the SSH bridge:**
-
-```bash
-systemctl status ssh-bridge.service
-echo $SSH_AUTH_SOCK
-```
-
-**Requirements:**
-- Windows OpenSSH Agent must be running (`Get-Service ssh-agent` in PowerShell)
-- `npiperelay.exe` must be accessible (checked in common paths: Program Files, scoop, chocolatey)
-- Your SSH keys must be added to the Windows agent (`ssh-add` in PowerShell)
+Then relaunch. If that doesn't work, set DNS manually as above.
 
 ## Proxy Not Detected
 
@@ -59,7 +41,6 @@ echo $SSH_AUTH_SOCK
 **Check proxy settings:**
 
 ```bash
-cat /etc/profile.d/caelicode-proxy.sh
 echo $http_proxy
 ```
 
@@ -105,35 +86,18 @@ mise install
 mise reshim
 ```
 
-## First Login Doesn't Create User
+## Dropped Into Root Shell
 
-**Symptom:** Dropped into root shell instead of user shell.
+**Symptom:** Shell says `root@...` instead of `caelicode@...`.
 
-**The `run-once` service may have failed:**
-
-```bash
-systemctl status run-once.service
-journalctl -u run-once.service
-```
-
-**Manual user creation:**
-
-```bash
-USERNAME="yourname"
-useradd -ms /bin/bash "$USERNAME"
-usermod -aG sudo "$USERNAME"
-echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
-chmod 0440 /etc/sudoers.d/$USERNAME
-```
-
-Then set default user in `/etc/wsl.conf`:
+**Fix:** Check `/etc/wsl.conf` has the default user:
 
 ```ini
 [user]
-default=yourname
+default = caelicode
 ```
 
-Restart WSL: `wsl --shutdown` from PowerShell.
+Then restart WSL: `wsl --shutdown` from PowerShell, and relaunch.
 
 ## Image Too Large
 

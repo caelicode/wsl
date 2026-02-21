@@ -4,9 +4,9 @@
 [![Release](https://github.com/caelicode/wsl/actions/workflows/release.yml/badge.svg)](https://github.com/caelicode/wsl/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Enterprise-grade WSL2 distro builder with **profile-based builds**, **pinned tool versions**, **dynamic DNS**, **SSH agent forwarding**, **proxy detection**, and **in-place updates**.
+Enterprise-grade WSL2 distro builder with **profile-based builds**, **pinned tool versions**, **SSH agent forwarding**, **proxy detection**, and **in-place updates**.
 
-Built on Ubuntu 24.04 with systemd support.
+Built on Ubuntu 24.04.
 
 ## Profiles
 
@@ -143,9 +143,9 @@ Smart aliases upgrade common tools transparently: `ls` uses eza, `cat` uses bat,
 
 Edit `/etc/caelicode/starship.toml` to customize the prompt, or `/etc/caelicode/config.yaml` for MOTD and branding. Changes take effect on next login — no re-import needed.
 
-### Dynamic DNS resolution
+### DNS resolution
 
-A systemd timer polls Windows DNS every 5 seconds and rewrites `/etc/resolv.conf` when changes are detected. Survives VPN connect/disconnect without manual intervention.
+WSL auto-generates `/etc/resolv.conf` on each boot with the correct DNS servers from your Windows network configuration. If DNS breaks (e.g., after VPN connect/disconnect), restart WSL with `wsl --shutdown` and relaunch.
 
 ### SSH agent forwarding
 
@@ -188,8 +188,8 @@ Validates DNS, tools (profile-aware), network connectivity, and SSH agent status
 ```
 ├── Dockerfile          Multi-stage: base → sre/dev/data profiles
 ├── profiles/           Pinned tool versions (TOML)
-├── config/             WSL, shell, systemd, starship configs
-├── scripts/            Runtime scripts (DNS, SSH, proxy, update)
+├── config/             WSL, shell, starship configs
+├── scripts/            Runtime scripts (health check, update)
 ├── test/               Profile-specific test suites
 ├── install.ps1         One-line PowerShell installer
 ├── build.sh            Local build script

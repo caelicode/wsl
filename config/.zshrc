@@ -6,6 +6,7 @@
 # ── Oh My Zsh ──────────────────────────────────────────────────────
 export ZSH="/opt/oh-my-zsh"
 ZSH_THEME=""  # Disabled — using Starship prompt instead
+DISABLE_AUTO_UPDATE=true
 
 # Only load plugins that exist
 plugins=(git)
