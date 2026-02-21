@@ -16,6 +16,11 @@
     .\install.ps1 -Profile dev -InstallDir D:\wsl\caelicode -Force
 #>
 
+# ── Wrap in scriptblock for irm | iex safety ─────────────────────────
+# In `irm | iex` context, `exit` kills the entire PowerShell host.
+# A scriptblock isolates the scope so `return` exits cleanly instead.
+& {
+
 # ── irm | iex compatible — no param() block ─────────────────────────
 # When run directly, these can be set via: .\install.ps1 -Profile sre
 # When piped, the interactive menu handles profile selection.
@@ -95,7 +100,7 @@ if (-not $isAdmin) {
     Write-Host ""
     Write-Host "    Right-click PowerShell and select 'Run as Administrator'," -ForegroundColor Yellow
     Write-Host "    then re-run the install command." -ForegroundColor Yellow
-    exit 1
+    return
 }
 
 # ── 3. Check WSL prerequisites ──────────────────────────────────────
@@ -111,7 +116,7 @@ if (-not $SkipWslCheck) {
         Write-Host "      wsl --install --no-distribution" -ForegroundColor White
         Write-Host ""
         Write-Host "    Then restart your computer and re-run this installer." -ForegroundColor Yellow
-        exit 1
+        return
     }
 
     # Check WSL version (need WSL2)
@@ -121,7 +126,7 @@ if (-not $SkipWslCheck) {
             Write-Fail "WSL default version is 1. CaeliCode requires WSL2."
             Write-Host ""
             Write-Host "    Run: wsl --set-default-version 2" -ForegroundColor Yellow
-            exit 1
+            return
         }
     } catch {
         # --status may not exist on older builds; continue anyway
@@ -133,7 +138,7 @@ if (-not $SkipWslCheck) {
 # ── 4. Profile selection ────────────────────────────────────────────
 if ($CaeliProfile -and $CaeliProfile -notin $ValidProfiles) {
     Write-Fail "Invalid profile '$CaeliProfile'. Must be one of: $($ValidProfiles -join ', ')"
-    exit 1
+    return
 }
 
 if (-not $CaeliProfile) {
@@ -180,12 +185,13 @@ if ($existingDistros -match [regex]::Escape($DistroName)) {
     } else {
         Write-Fail "Distro '$DistroName' already exists."
         Write-Host ""
-        Write-Host "    To reinstall, run with -Force:" -ForegroundColor Yellow
-        Write-Host "      .\install.ps1 -Profile $CaeliProfile -Force" -ForegroundColor White
+        Write-Host "    To reinstall, first unregister the existing distro:" -ForegroundColor Yellow
+        Write-Host "      wsl --unregister $DistroName" -ForegroundColor White
+        Write-Host "    Then re-run this installer." -ForegroundColor Yellow
         Write-Host ""
         Write-Host "    To update in-place instead:" -ForegroundColor Yellow
         Write-Host "      wsl -d $DistroName -- caelicode-update" -ForegroundColor White
-        exit 1
+        return
     }
 }
 
@@ -199,7 +205,7 @@ try {
     }
 } catch {
     Write-Fail "Failed to fetch release info: $_"
-    exit 1
+    return
 }
 
 $version = $releaseInfo.tag_name
@@ -213,7 +219,7 @@ if (-not $tarAsset) {
     Write-Fail "Profile '$CaeliProfile' not found in release $version."
     Write-Host "    Available assets:" -ForegroundColor Yellow
     $releaseInfo.assets | ForEach-Object { Write-Host "      - $($_.name)" -ForegroundColor DarkGray }
-    exit 1
+    return
 }
 
 $tarSizeMB = [math]::Round($tarAsset.size / 1MB, 1)
@@ -249,7 +255,7 @@ try {
 } catch {
     Write-Host ""
     Write-Fail "Download failed: $_"
-    exit 1
+    return
 } finally {
     $webClient.Dispose()
     Get-EventSubscriber | Unregister-Event -Force 2>$null
@@ -262,7 +268,7 @@ try {
     }
 } catch {
     Write-Fail "Failed to download checksum file: $_"
-    exit 1
+    return
 }
 
 # ── 9. Verify checksum ──────────────────────────────────────────────
@@ -278,7 +284,7 @@ if ($expectedHash -ne $actualHash) {
     Write-Host ""
     Write-Host "    The download may be corrupted. Please try again." -ForegroundColor Yellow
     Remove-Item $tempDir -Recurse -Force
-    exit 1
+    return
 }
 
 Write-Success "Checksum verified: $($actualHash.Substring(0, 16))..."
@@ -294,7 +300,7 @@ $importResult = wsl.exe --import $DistroName $InstallDir $tarPath 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "WSL import failed: $importResult"
     Remove-Item $tempDir -Recurse -Force
-    exit 1
+    return
 }
 
 Write-Success "Distro imported successfully"
@@ -332,3 +338,5 @@ Write-Host ""
 Write-Host "  Open in VS Code (requires VS Code on Windows):" -ForegroundColor Yellow
 Write-Host "    wsl -d $DistroName -- code ." -ForegroundColor White
 Write-Host ""
+
+} @args
