@@ -48,6 +48,8 @@ jobs:
           build-args: VERSION=${{ steps.version.outputs.tag }}
           tags: caelicode-wsl:${{ matrix.profile }}
           load: true
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
 
       - name: Run tests
         run: |

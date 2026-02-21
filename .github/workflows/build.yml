@@ -58,6 +58,8 @@ jobs:
           load: true
           cache-from: type=gha,scope=${{ matrix.profile }}
           cache-to: type=gha,mode=max,scope=${{ matrix.profile }}
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
 
       - name: Run ${{ matrix.profile }} tests
         run: |

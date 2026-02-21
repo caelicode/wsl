@@ -85,8 +85,12 @@ RUN install -dm 755 /etc/apt/keyrings && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ── Mise: install base tools (Python + modern CLI essentials) ────────
+# Uses BuildKit secret to avoid GitHub API rate limits during install.
+# The token is never stored in the image — only used at build time.
 COPY profiles/base.toml /opt/mise/config/config.toml
-RUN mise install --env /opt/mise/config/config.toml && mise reshim
+RUN --mount=type=secret,id=github_token \
+    export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
+    mise install --env /opt/mise/config/config.toml && mise reshim
 
 # ── SSL/TLS trust ────────────────────────────────────────────────────
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
@@ -163,7 +167,9 @@ RUN echo "base" > /opt/caelicode/PROFILE && \
 FROM base AS sre-image
 
 COPY profiles/sre.toml /opt/mise/config/config.toml
-RUN mise install --env /opt/mise/config/config.toml && mise reshim
+RUN --mount=type=secret,id=github_token \
+    export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
+    mise install --env /opt/mise/config/config.toml && mise reshim
 
 # Azure CLI (official Microsoft apt repository)
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash && \
@@ -193,7 +199,9 @@ RUN apt-get update -q && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY profiles/dev.toml /opt/mise/config/config.toml
-RUN mise install --env /opt/mise/config/config.toml && mise reshim
+RUN --mount=type=secret,id=github_token \
+    export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
+    mise install --env /opt/mise/config/config.toml && mise reshim
 
 ARG VERSION=dev
 RUN echo "dev" > /opt/caelicode/PROFILE && \
@@ -213,7 +221,9 @@ RUN apt-get update -q && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY profiles/data.toml /opt/mise/config/config.toml
-RUN mise install --env /opt/mise/config/config.toml && mise reshim
+RUN --mount=type=secret,id=github_token \
+    export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
+    mise install --env /opt/mise/config/config.toml && mise reshim
 
 # Install Python data tools via uv (after mise installs uv)
 ENV UV_TOOL_BIN_DIR=/usr/local/bin
