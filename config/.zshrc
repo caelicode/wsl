@@ -38,14 +38,12 @@ if command -v mise &>/dev/null; then
 fi
 
 # ── Starship Prompt ───────────────────────────────────────────────
-# The mise shim for starship hangs in WSL during `starship init zsh`.
-# Bypass it by locating the actual binary under /opt/mise/installs/.
+# The real starship binary is symlinked into /opt/mise/bin/ during
+# Docker build, bypassing the mise shim (which hangs in WSL).
 export STARSHIP_CONFIG="/etc/caelicode/starship.toml"
-_starship_bin=$(find /opt/mise/installs/starship -maxdepth 2 -name "starship" -type f 2>/dev/null | head -1)
-if [[ -n "$_starship_bin" && -x "$_starship_bin" ]]; then
-    eval "$("$_starship_bin" init zsh)"
+if command -v starship &>/dev/null; then
+    eval "$(starship init zsh)"
 fi
-unset _starship_bin
 
 # ── Zoxide (smart cd) ─────────────────────────────────────────────
 if command -v zoxide &>/dev/null; then
