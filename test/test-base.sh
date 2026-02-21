@@ -59,7 +59,6 @@ check "PROFILE file exists" test -f /opt/caelicode/PROFILE
 check "config.yaml exists" test -f /etc/caelicode/config.yaml
 check "starship.toml exists" test -f /etc/caelicode/starship.toml
 check "wsl.conf exists" test -f /etc/wsl.conf
-check "boot.sh exists" test -x /opt/caelicode/scripts/boot.sh
 check "dns-watch.sh exists" test -x /opt/caelicode/scripts/dns-watch.sh
 check "health-check.sh exists" test -x /opt/caelicode/scripts/health-check.sh
 check "caelicode-update exists" test -x /opt/caelicode/scripts/caelicode-update
@@ -71,8 +70,15 @@ check "bash_aliases in skel" test -f /etc/skel/.bash_aliases
 check "zshrc in skel" test -f /etc/skel/.zshrc
 
 # WSL config
-check "boot command in wsl.conf" grep -q "command = /opt/caelicode/scripts/boot.sh" /etc/wsl.conf
+check "default user in wsl.conf" grep -q "default = caelicode" /etc/wsl.conf
 check "generateResolvConf disabled" grep -q "generateResolvConf = false" /etc/wsl.conf
+check "caelicode user exists" getent passwd caelicode
+check "caelicode user has zsh shell" grep -q "caelicode.*zsh" /etc/passwd
+check "caelicode user has sudo" test -f /etc/sudoers.d/caelicode
+check "caelicode user has .zshrc" test -f /home/caelicode/.zshrc
+check "profile.d env script" test -f /etc/profile.d/00-caelicode-env.sh
+check "profile.d init script" test -f /etc/profile.d/99-caelicode-init.sh
+check "DNS fallback staged" test -f /etc/caelicode/resolv.conf.fallback
 
 # SSL/TLS
 check "ca-certificates bundle exists" test -f /etc/ssl/certs/ca-certificates.crt

@@ -323,11 +323,10 @@ Write-Host ""
 Write-Host "  Launch your distro:" -ForegroundColor Yellow
 Write-Host "    wsl -d $DistroName" -ForegroundColor White
 Write-Host ""
-Write-Host "  On first launch, CaeliCode will:" -ForegroundColor DarkGray
-Write-Host "    - Detect your Windows username" -ForegroundColor DarkGray
-Write-Host "    - Create a matching Linux user with sudo" -ForegroundColor DarkGray
-Write-Host "    - Configure DNS from your Windows settings" -ForegroundColor DarkGray
-Write-Host "    - Set the default user for future launches" -ForegroundColor DarkGray
+Write-Host "  Default user: " -NoNewline; Write-Host "caelicode" -ForegroundColor Cyan -NoNewline
+Write-Host " (sudo enabled, zsh shell)" -ForegroundColor DarkGray
+Write-Host "  Rename later: " -ForegroundColor DarkGray -NoNewline
+Write-Host "sudo usermod -l yourname caelicode" -ForegroundColor White
 Write-Host ""
 Write-Host "  Set as default distro:" -ForegroundColor Yellow
 Write-Host "    wsl --set-default $DistroName" -ForegroundColor White

@@ -134,6 +134,17 @@ RUN chmod +x /opt/caelicode/test/*.sh 2>/dev/null || true
 RUN chsh -s /bin/zsh root && \
     sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd 2>/dev/null || true
 
+# ── Default user ─────────────────────────────────────────────────────
+# Pre-create a default user during build so the distro is immediately
+# usable after `wsl --import` — no boot-time Windows interop needed.
+# Users can rename later via: sudo usermod -l newname caelicode
+RUN useradd -ms /bin/zsh caelicode && \
+    usermod -aG sudo caelicode && \
+    echo "caelicode ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/caelicode && \
+    chmod 0440 /etc/sudoers.d/caelicode && \
+    cp /etc/skel/.bashrc /etc/skel/.bash_aliases /etc/skel/.zshrc /home/caelicode/ && \
+    chown caelicode:caelicode /home/caelicode/.bashrc /home/caelicode/.bash_aliases /home/caelicode/.zshrc
+
 # ── Persist environment for WSL ──────────────────────────────────────
 # Docker ENV is lost on `docker export` → `wsl --import`. Write PATH and
 # other critical vars to /etc/environment (read by WSL on boot) and
@@ -142,13 +153,13 @@ RUN echo 'PATH="/opt/mise/bin:/opt/mise/shims:/usr/local/sbin:/usr/local/bin:/us
     echo 'MISE_DATA_DIR="/opt/mise"' >> /etc/environment && \
     echo 'MISE_CONFIG_DIR="/opt/mise/config"' >> /etc/environment && \
     echo 'STARSHIP_CONFIG="/etc/caelicode/starship.toml"' >> /etc/environment
-COPY config/caelicode-env.sh /etc/profile.d/caelicode-env.sh
+COPY config/caelicode-env.sh /etc/profile.d/00-caelicode-env.sh
+COPY config/caelicode-init.sh /etc/profile.d/99-caelicode-init.sh
 
 # ── Pre-seed DNS fallback ────────────────────────────────────────────
 # WSL generateResolvConf is disabled. Provide sane defaults so DNS works
-# immediately. The run-once service upgrades this with Windows DNS later.
-# Note: /etc/resolv.conf is managed by Docker during build, so we write
-# the fallback to a staging file and copy it in via the run-once service.
+# immediately. The profile.d init script upgrades to Windows DNS on first
+# login. Docker blocks writes to /etc/resolv.conf, so we stage it here.
 RUN printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/caelicode/resolv.conf.fallback
 
 # ── Cleanup ──────────────────────────────────────────────────────────

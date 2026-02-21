@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CaeliCode WSL — User creation tests
-# Tests the boot.sh user creation logic (simulated, since we can't access Windows in CI)
+# Tests that the pre-created default user is correctly configured.
 set -euo pipefail
 
 PASS=0; FAIL=0
@@ -16,30 +16,25 @@ check() {
 
 echo "── User Creation Tests ──"
 
-# Script exists and is executable
-check "boot.sh exists" test -x /opt/caelicode/scripts/boot.sh
+# Default user exists and is configured correctly
+check "caelicode user exists" getent passwd caelicode
+check "caelicode home dir" test -d /home/caelicode
+check "caelicode shell is zsh" grep -q "caelicode.*/bin/zsh" /etc/passwd
+check "caelicode in sudo group" id -nG caelicode
+check "caelicode sudoers file" test -f /etc/sudoers.d/caelicode
 
-# Simulate user creation
-TESTUSER="testcaelicode"
-if ! getent passwd "$TESTUSER" >/dev/null 2>&1; then
-    useradd -ms /bin/zsh "$TESTUSER"
-    usermod -aG sudo "$TESTUSER"
-    echo "${TESTUSER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${TESTUSER}"
-    chmod 0440 "/etc/sudoers.d/${TESTUSER}"
-fi
+# Shell config is in place
+check "caelicode has .zshrc" test -f /home/caelicode/.zshrc
+check "caelicode has .bashrc" test -f /home/caelicode/.bashrc
+check "caelicode has .bash_aliases" test -f /home/caelicode/.bash_aliases
 
-check "Test user exists" getent passwd "$TESTUSER"
-check "Test user has home dir" test -d "/home/${TESTUSER}"
-check "Test user in sudo group" id -nG "$TESTUSER"
-check "Sudoers file exists" test -f "/etc/sudoers.d/${TESTUSER}"
-
-# Verify skel files would be copied
+# Skel files available for future users
 check "Skel .bashrc available" test -f /etc/skel/.bashrc
 check "Skel .bash_aliases available" test -f /etc/skel/.bash_aliases
+check "Skel .zshrc available" test -f /etc/skel/.zshrc
 
-# Cleanup
-userdel -r "$TESTUSER" 2>/dev/null || true
-rm -f "/etc/sudoers.d/${TESTUSER}"
+# WSL default user is set
+check "wsl.conf default user" grep -q "default = caelicode" /etc/wsl.conf
 
 echo ""
 echo "User Creation Results: ${PASS} passed, ${FAIL} failed"
