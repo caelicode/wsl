@@ -423,6 +423,36 @@ if ($wtPaths.Count -gt 0) {
     Write-Host "    Settings (Ctrl+,) > Profiles > Appearance > Font face > 'MesloLGS NF'" -ForegroundColor DarkGray
 }
 
+# ── 12c. Configure VS Code integrated terminal font ──────────────
+$vscodePaths = @(
+    (Join-Path $env:APPDATA "Code\User\settings.json"),
+    (Join-Path $env:APPDATA "Code - Insiders\User\settings.json")
+) | Where-Object { Test-Path $_ }
+
+if ($vscodePaths.Count -gt 0) {
+    Write-Step "Configuring VS Code terminal font..."
+
+    $vscodeConfigured = $false
+    foreach ($vscodePath in $vscodePaths) {
+        try {
+            $vscodeJson = Get-Content $vscodePath -Raw | ConvertFrom-Json
+            $vscodeJson | Add-Member -NotePropertyName "terminal.integrated.fontFamily" `
+                -NotePropertyValue "MesloLGS NF" -Force
+            $vscodeJson | ConvertTo-Json -Depth 20 | Set-Content $vscodePath -Encoding UTF8
+            $vscodeConfigured = $true
+        } catch {
+            Write-Host "    Could not auto-configure VS Code settings" -ForegroundColor DarkGray
+        }
+    }
+
+    if ($vscodeConfigured) {
+        Write-Success "VS Code terminal configured with MesloLGS NF font"
+    }
+} else {
+    Write-Host "    VS Code settings not found — if using VS Code, set the font manually:" -ForegroundColor DarkGray
+    Write-Host "    Settings (Ctrl+,) > search 'terminal font' > set 'MesloLGS NF'" -ForegroundColor DarkGray
+}
+
 # ── 13. First launch info ───────────────────────────────────────────
 Write-Host ""
 Write-Host "  ╔═══════════════════════════════════════════╗" -ForegroundColor Green

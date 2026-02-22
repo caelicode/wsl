@@ -1,7 +1,6 @@
 # CaeliCode WSL
 
-[![Build & Test](https://github.com/caelicode/wsl/actions/workflows/build.yml/badge.svg)](https://github.com/caelicode/wsl/actions/workflows/build.yml)
-[![Release](https://github.com/caelicode/wsl/actions/workflows/release.yml/badge.svg)](https://github.com/caelicode/wsl/actions/workflows/release.yml)
+[![Build & Release](https://github.com/caelicode/wsl/actions/workflows/build.yml/badge.svg)](https://github.com/caelicode/wsl/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Enterprise-grade WSL2 distro builder with **profile-based builds**, **pinned tool versions**, **SSH agent forwarding**, **proxy detection**, and **in-place updates**.
@@ -142,6 +141,24 @@ CaeliCode WSL ships with zsh as the default shell, powered by oh-my-zsh and star
 Smart aliases upgrade common tools transparently: `ls` uses eza, `cat` uses bat, `lg` opens lazygit — all with graceful fallback if a tool isn't available on your profile.
 
 Edit `/etc/caelicode/starship.toml` to customize the prompt, or `/etc/caelicode/config.yaml` for MOTD and branding. Changes take effect on next login — no re-import needed.
+
+### Terminal font (Nerd Font icons)
+
+CaeliCode uses Starship prompt with Nerd Font icons for git status, directory indicators, and tool versions. The installer automatically installs the **MesloLGS NF** font and configures Windows Terminal and VS Code to use it.
+
+If icons display as `?` or blank rectangles, the font wasn't applied to your terminal. Set it manually:
+
+**Windows Terminal:** Settings (`Ctrl+,`) → Defaults → Appearance → Font face → `MesloLGS NF`
+
+**VS Code integrated terminal:** Settings (`Ctrl+,`) → search `terminal.integrated.fontFamily` → set to `MesloLGS NF`
+
+Or add to your VS Code `settings.json` directly:
+
+```json
+"terminal.integrated.fontFamily": "MesloLGS NF"
+```
+
+If the font is missing entirely, download it from the [powerlevel10k font repository](https://github.com/romkatv/powerlevel10k#fonts) and install all four variants (Regular, Bold, Italic, Bold Italic).
 
 ### DNS resolution
 
