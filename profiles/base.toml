@@ -9,7 +9,8 @@ fd = "latest"
 bat = "latest"
 eza = "latest"
 delta = "latest"
-starship = "latest"
+# starship is installed directly via its official installer (not mise)
+# to avoid the mise shim hang in WSL — see Dockerfile
 direnv = "latest"
 zoxide = "latest"
 yq = "latest"

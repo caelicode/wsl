@@ -24,8 +24,8 @@ fi
 
 # ── Starship Prompt ──────────────────────────────────────────────────
 export STARSHIP_CONFIG="/etc/caelicode/starship.toml"
-if command -v starship &>/dev/null; then
-    eval "$(starship init bash)"
+if [[ -x /usr/local/bin/starship ]]; then
+    eval "$(/usr/local/bin/starship init bash)"
 else
     # Fallback PS1 if starship is not available
     _git_branch() {

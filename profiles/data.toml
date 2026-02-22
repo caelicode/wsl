@@ -9,7 +9,7 @@ fd = "latest"
 bat = "latest"
 eza = "latest"
 delta = "latest"
-starship = "latest"
+# starship is installed directly via its official installer (not mise)
 direnv = "latest"
 zoxide = "latest"
 yq = "latest"

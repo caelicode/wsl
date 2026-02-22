@@ -48,8 +48,8 @@ check_version "direnv" "direnv --version"
 check_version "zoxide" "zoxide --version"
 check_version "yq" "yq --version"
 
-# Starship shim bypass (real binary symlinked to /opt/mise/bin/)
-check "starship symlink in /opt/mise/bin" test -x /opt/mise/bin/starship
+# Starship (installed directly to /usr/local/bin, not via mise)
+check "starship in /usr/local/bin" test -x /usr/local/bin/starship
 
 # Oh My Zsh
 check "oh-my-zsh installed" test -d /opt/oh-my-zsh

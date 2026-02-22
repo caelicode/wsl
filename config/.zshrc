@@ -11,8 +11,6 @@
 # ── PATH ─────────────────────────────────────────────────────────
 # Set a clean Linux-only PATH. Windows paths are excluded via
 # appendWindowsPath=false in /etc/wsl.conf to avoid 9P overhead.
-# Put /opt/mise/bin BEFORE /opt/mise/shims so the real starship
-# binary (symlinked at build time) is found before the mise shim.
 export PATH="/opt/mise/bin:/opt/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # ── History ──────────────────────────────────────────────────────
@@ -52,13 +50,11 @@ if command -v mise &>/dev/null; then
 fi
 
 # ── Starship Prompt ─────────────────────────────────────────────
-# The real starship binary is symlinked into /opt/mise/bin/ at
-# Docker build time (see Dockerfile). This directory is before
-# /opt/mise/shims/ in PATH, so the real binary is used instead of
-# the mise shim which hangs in WSL.
+# Starship is installed directly to /usr/local/bin/ (not via mise)
+# to avoid the mise shim hang in WSL.
 export STARSHIP_CONFIG="/etc/caelicode/starship.toml"
-if command -v starship &>/dev/null; then
-    eval "$(starship init zsh)"
+if [[ -x /usr/local/bin/starship ]]; then
+    eval "$(/usr/local/bin/starship init zsh)"
 fi
 
 # ── Zoxide (smart cd) ───────────────────────────────────────────

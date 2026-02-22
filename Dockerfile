@@ -92,12 +92,12 @@ RUN --mount=type=secret,id=github_token \
     export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
     mise install --env /opt/mise/config/config.toml && mise reshim
 
-# ── Starship shim bypass ─────────────────────────────────────────
-# The mise shim for starship hangs in WSL during `starship init zsh`
-# and prompt rendering. Symlink the real binary into /opt/mise/bin/
-# which comes before /opt/mise/shims/ in PATH, bypassing the shim.
-RUN _sb=$(find /opt/mise/installs/starship -maxdepth 2 -name "starship" -type f | head -1) && \
-    [ -n "$_sb" ] && ln -sf "$_sb" /opt/mise/bin/starship || true
+# ── Starship prompt (direct install — NOT via mise) ──────────────
+# The mise shim for starship hangs indefinitely in WSL during both
+# `starship init zsh` and prompt rendering. Install starship directly
+# to /usr/local/bin/ using the official installer to avoid this.
+# See: https://starship.rs/guide/#step-1-install-starship
+RUN curl -sS https://starship.rs/install.sh | sh -s -- --yes --bin-dir /usr/local/bin
 
 # ── SSL/TLS trust ────────────────────────────────────────────────────
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
