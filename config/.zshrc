@@ -40,14 +40,11 @@ if [[ -f "$ZSH/oh-my-zsh.sh" ]]; then
 fi
 
 # ── Mise (Tool Version Manager) ─────────────────────────────────
-# Use `mise activate` for interactive shells (provides env vars and
-# hooks). Do NOT combine with shims in PATH — there is a known bug
-# (jdx/mise#4444) where activate fails to remove shims from PATH.
-# We keep shims in PATH above only as a fallback for non-interactive
-# contexts; activate takes precedence in interactive sessions.
-if command -v mise &>/dev/null; then
-    eval "$(mise activate zsh)"
-fi
+# Shims in /opt/mise/shims/ are already in PATH (set above). This
+# is sufficient for running all mise-managed tools. We intentionally
+# do NOT use `mise activate` because its hook-env runs on every
+# prompt and can hang in WSL2 (network timeouts, remote version
+# checks). See: https://github.com/jdx/mise/discussions/4821
 
 # ── Starship Prompt ─────────────────────────────────────────────
 # Starship is installed directly to /usr/local/bin/ (not via mise)

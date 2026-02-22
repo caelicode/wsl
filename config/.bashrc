@@ -17,10 +17,10 @@ shopt -s globstar 2>/dev/null
 [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
 
 # ── Mise (Tool Version Manager) ─────────────────────────────────────
+# Shims are already in PATH via /etc/profile.d/00-caelicode-env.sh.
+# We do NOT use `mise activate` because its hook-env runs on every
+# prompt and can hang in WSL2. See: https://github.com/jdx/mise/discussions/4821
 export PATH="/opt/mise/bin:/opt/mise/shims:$PATH"
-if command -v mise &>/dev/null; then
-    eval "$(mise activate bash)"
-fi
 
 # ── Starship Prompt ──────────────────────────────────────────────────
 export STARSHIP_CONFIG="/etc/caelicode/starship.toml"
