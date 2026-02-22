@@ -23,8 +23,8 @@ find_npiperelay() {
         "/mnt/c/tools/npiperelay.exe" \
         "/mnt/c/Users/*/go/bin/npiperelay.exe" \
         "/mnt/c/Users/*/scoop/shims/npiperelay.exe"; do
-        # shellcheck disable=SC2086,SC2012
         local found
+        # shellcheck disable=SC2086,SC2012
         found="$(ls $path 2>/dev/null | head -1)"
         if [ -n "$found" ] && [ -x "$found" ]; then
             echo "$found"

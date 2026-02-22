@@ -64,8 +64,8 @@ merge_windows_certs() {
     local linux_cert_dir="/usr/local/share/ca-certificates/caelicode"
 
     # Export Windows root certs via PowerShell
-    # shellcheck disable=SC2016  # Single quotes intentional: PowerShell Cert:\ path
     local cert_pem
+    # shellcheck disable=SC2016  # Single quotes intentional: PowerShell Cert:\ path
     cert_pem="$(/mnt/c/windows/system32/windowspowershell/v1.0/powershell.exe \
         -NoProfile -NonInteractive -Command \
         'Get-ChildItem -Path Cert:\LocalMachine\Root | ForEach-Object { [System.Convert]::ToBase64String($_.RawData) }' \
