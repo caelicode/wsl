@@ -174,13 +174,17 @@ Reads Windows proxy settings via `netsh.exe` and merges Windows root CA certific
 
 ### VS Code integration
 
-VS Code is installed on the Windows side. Open any WSL folder with:
+CaeliCode includes a built-in `code` wrapper that finds VS Code on your Windows install and launches it directly — no Windows PATH pollution needed (`appendWindowsPath` is deliberately set to `false` to avoid mise shim issues).
+
+Open any WSL folder with:
 
 ```bash
 code .
 ```
 
-The VS Code Remote WSL extension auto-provisions the server component inside the distro. No additional setup needed.
+The wrapper probes standard install locations (user install, system install, Scoop) and caches the resolved path for fast subsequent launches. The VS Code [WSL extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl) auto-provisions the server component inside the distro.
+
+**Requirements:** VS Code installed on Windows. Install the [WSL extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl) if it isn't bundled with your VS Code version.
 
 ### In-place updates
 

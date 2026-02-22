@@ -145,8 +145,10 @@ COPY config/.zshrc /root/.zshrc
 COPY scripts/ /opt/caelicode/scripts/
 RUN find /opt/caelicode/scripts -name "*.sh" -exec chmod +x {} + && \
     chmod +x /opt/caelicode/scripts/caelicode-update && \
+    chmod +x /opt/caelicode/scripts/code && \
     ln -sf /opt/caelicode/scripts/caelicode-update /usr/local/bin/caelicode-update && \
-    ln -sf /opt/caelicode/scripts/health-check.sh /usr/local/bin/caelicode-health
+    ln -sf /opt/caelicode/scripts/health-check.sh /usr/local/bin/caelicode-health && \
+    ln -sf /opt/caelicode/scripts/code /usr/local/bin/code
 
 # Copy profiles for reference
 COPY profiles/ /opt/caelicode/profiles/

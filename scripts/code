@@ -1,0 +1,68 @@
+#!/bin/bash
+# CaeliCode WSL — VS Code launcher
+#
+# Wrapper that finds and launches VS Code from WSL without needing
+# appendWindowsPath=true (which pollutes PATH and breaks mise).
+# Probes standard VS Code install locations on the Windows side.
+
+set -euo pipefail
+
+# Cache the resolved path for subsequent calls
+CACHE_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/caelicode-vscode-path"
+
+find_code_cli() {
+    # Get Windows username via environment or wslvar
+    local win_user
+    win_user="$(
+        /mnt/c/Windows/System32/cmd.exe /C "echo %USERNAME%" 2>/dev/null | tr -d '\r'
+    )" || true
+
+    # Candidate locations (user install, system install, scoop, winget)
+    local candidates=()
+
+    if [ -n "${win_user:-}" ]; then
+        candidates+=(
+            "/mnt/c/Users/${win_user}/AppData/Local/Programs/Microsoft VS Code/bin/code"
+            "/mnt/c/Users/${win_user}/scoop/apps/vscode/current/bin/code"
+        )
+    fi
+
+    candidates+=(
+        "/mnt/c/Program Files/Microsoft VS Code/bin/code"
+        "/mnt/c/Program Files (x86)/Microsoft VS Code/bin/code"
+    )
+
+    for candidate in "${candidates[@]}"; do
+        if [ -f "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Try cached path first
+if [ -f "$CACHE_FILE" ]; then
+    VSCODE_PATH="$(cat "$CACHE_FILE")"
+    if [ -f "$VSCODE_PATH" ]; then
+        exec "$VSCODE_PATH" "$@"
+    fi
+    # Cached path is stale — remove and re-probe
+    rm -f "$CACHE_FILE"
+fi
+
+# Probe for VS Code
+VSCODE_PATH="$(find_code_cli)" || {
+    echo "error: VS Code not found on the Windows side." >&2
+    echo "" >&2
+    echo "Install VS Code on Windows from: https://code.visualstudio.com" >&2
+    echo "Make sure to check 'Add to PATH' during installation." >&2
+    exit 1
+}
+
+# Cache the path for next time
+mkdir -p "$(dirname "$CACHE_FILE")"
+echo "$VSCODE_PATH" > "$CACHE_FILE"
+
+exec "$VSCODE_PATH" "$@"
