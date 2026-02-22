@@ -81,6 +81,7 @@ ENV MISE_CONFIG_DIR=/opt/mise/config
 # /opt/mise/bin/ are used instead (see shim bypass step below).
 ENV PATH="/opt/mise/bin:/opt/mise/shims:$PATH"
 
+# hadolint ignore=DL3008
 RUN install -dm 755 /etc/apt/keyrings && \
     curl -fsSL https://mise.jdx.dev/gpg-key.pub | gpg --dearmor -o /etc/apt/keyrings/mise-archive-keyring.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.gpg arch=amd64] https://mise.jdx.dev/deb stable main" | tee /etc/apt/sources.list.d/mise.list && \
@@ -200,6 +201,8 @@ RUN echo "base" > /opt/caelicode/PROFILE && \
 ###############################################################################
 FROM base AS sre-image
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 COPY profiles/sre.toml /opt/mise/config/config.toml
 RUN --mount=type=secret,id=github_token \
     GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || echo "")" && export GITHUB_TOKEN && \
@@ -215,10 +218,12 @@ RUN for shim in /opt/mise/shims/*; do \
     done
 
 # Azure CLI (official Microsoft apt repository)
+# hadolint ignore=DL3008
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Google Cloud SDK
+# hadolint ignore=DL3008
 RUN curl -sSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
         gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
@@ -236,7 +241,10 @@ RUN echo "sre" > /opt/caelicode/PROFILE && \
 ###############################################################################
 FROM base AS dev-image
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Container tools
+# hadolint ignore=DL3008
 RUN apt-get update -q && apt-get install -y --no-install-recommends \
     podman \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -265,7 +273,10 @@ RUN echo "dev" > /opt/caelicode/PROFILE && \
 ###############################################################################
 FROM base AS data-image
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # PostgreSQL client + Redis client + SQLite
+# hadolint ignore=DL3008
 RUN apt-get update -q && apt-get install -y --no-install-recommends \
     postgresql-client \
     redis-tools \
