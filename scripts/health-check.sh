@@ -37,7 +37,7 @@ section "Tools"
 
 for cmd in git curl jq mise python3; do
     if command -v "$cmd" &>/dev/null; then
-        ver=$($cmd --version 2>/dev/null | head -1 || echo "ok")
+        ver="$($cmd --version 2>/dev/null | head -1 || echo "ok")"
         pass "$cmd: $ver"
     else
         fail "$cmd not found"
@@ -45,7 +45,7 @@ for cmd in git curl jq mise python3; do
 done
 
 # Profile-specific tools
-PROFILE=$(cat /opt/caelicode/PROFILE 2>/dev/null || echo "base")
+PROFILE="$(cat /opt/caelicode/PROFILE 2>/dev/null || echo "base")"
 
 if [ "$PROFILE" = "sre" ]; then
     for cmd in kubectl helm terraform k9s argocd; do
@@ -81,7 +81,7 @@ fi
 section "Networking"
 
 if [ -s /etc/resolv.conf ]; then
-    NS=$(grep -c "^nameserver" /etc/resolv.conf || echo "0")
+    NS="$(grep -c "^nameserver" /etc/resolv.conf || echo "0")"
     pass "DNS configured (${NS} nameservers)"
 else
     fail "resolv.conf is empty — DNS broken"
@@ -99,7 +99,7 @@ fi
 section "SSH Agent"
 
 if [ -S "${SSH_AUTH_SOCK:-}" ]; then
-    KEYS=$(ssh-add -l 2>/dev/null | wc -l || echo "0")
+    KEYS="$(ssh-add -l 2>/dev/null | wc -l || echo "0")"
     pass "SSH agent connected (${KEYS} keys)"
 elif [ -S "/tmp/caelicode-ssh-agent.sock" ]; then
     warn "SSH bridge socket exists but SSH_AUTH_SOCK not set"

@@ -67,7 +67,7 @@ build_profile() {
 
     echo "Exporting ${image_name} → ${TAR_DIR}/${tar_name}"
     local container_id
-    container_id=$($RUNTIME run --privileged -dt "${image_name}:${VERSION}" bash)
+    container_id="$($RUNTIME run --privileged -dt "${image_name}:${VERSION}" bash)"
     $RUNTIME export "$container_id" > "${TAR_DIR}/${tar_name}"
     $RUNTIME rm -f "$container_id" >/dev/null 2>&1
 
@@ -75,7 +75,7 @@ build_profile() {
     (cd "$TAR_DIR" && sha256sum "$tar_name" >> checksums.txt)
 
     local size
-    size=$(du -h "${TAR_DIR}/${tar_name}" | cut -f1)
+    size="$(du -h "${TAR_DIR}/${tar_name}" | cut -f1)"
     echo "Built: ${TAR_DIR}/${tar_name} (${size})"
     echo ""
 }

@@ -21,7 +21,10 @@ ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV DEBIAN_FRONTEND=noninteractive
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # ── System packages ──────────────────────────────────────────────────
+# hadolint ignore=DL3008
 RUN apt-get update -q && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     bash-completion \
     ca-certificates \
@@ -42,7 +45,6 @@ RUN apt-get update -q && apt-get upgrade -y && apt-get install -y --no-install-r
     tree \
     unzip \
     vim \
-    wget \
     zip \
     zsh \
     # Python build dependencies
@@ -80,9 +82,9 @@ ENV MISE_CONFIG_DIR=/opt/mise/config
 ENV PATH="/opt/mise/bin:/opt/mise/shims:$PATH"
 
 RUN install -dm 755 /etc/apt/keyrings && \
-    wget -qO - https://mise.jdx.dev/gpg-key.pub | gpg --dearmor | tee /etc/apt/keyrings/mise-archive-keyring.gpg > /dev/null && \
+    curl -fsSL https://mise.jdx.dev/gpg-key.pub | gpg --dearmor -o /etc/apt/keyrings/mise-archive-keyring.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.gpg arch=amd64] https://mise.jdx.dev/deb stable main" | tee /etc/apt/sources.list.d/mise.list && \
-    apt-get update && apt-get install -y mise && \
+    apt-get update && apt-get install -y --no-install-recommends mise && \
     mkdir -p /opt/mise/bin && \
     ln -sf /usr/bin/mise /opt/mise/bin/mise && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -92,7 +94,7 @@ RUN install -dm 755 /etc/apt/keyrings && \
 # The token is never stored in the image — only used at build time.
 COPY profiles/base.toml /opt/mise/config/config.toml
 RUN --mount=type=secret,id=github_token \
-    export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || echo "")" && export GITHUB_TOKEN && \
     mise install --env /opt/mise/config/config.toml && mise reshim
 
 # ── Bypass ALL mise shims ────────────────────────────────────────
@@ -101,8 +103,8 @@ RUN --mount=type=secret,id=github_token \
 # with a direct symlink to the real binary in /opt/mise/bin/.
 # This runs at build time when mise env vars are available.
 RUN for shim in /opt/mise/shims/*; do \
-        tool=$(basename "$shim"); \
-        real=$(mise which "$tool" 2>/dev/null); \
+        tool="$(basename "$shim")"; \
+        real="$(mise which "$tool" 2>/dev/null)"; \
         if [ -n "$real" ] && [ -x "$real" ]; then \
             ln -sf "$real" "/opt/mise/bin/$tool"; \
         fi; \
@@ -125,7 +127,7 @@ RUN git config --global http.sslcainfo /etc/ssl/certs/ca-certificates.crt
 ENV STARSHIP_CONFIG=/etc/caelicode/starship.toml
 
 # ── CaeliCode directory structure ────────────────────────────────────
-RUN mkdir -p /opt/caelicode/{scripts,profiles,test} /etc/caelicode
+RUN mkdir -p /opt/caelicode/scripts /opt/caelicode/profiles /opt/caelicode/test /etc/caelicode
 
 # Copy configs
 COPY config/wsl.conf /etc/wsl.conf
@@ -140,7 +142,7 @@ COPY config/.zshrc /root/.zshrc
 
 # Copy scripts
 COPY scripts/ /opt/caelicode/scripts/
-RUN chmod +x /opt/caelicode/scripts/*.sh 2>/dev/null || true && \
+RUN find /opt/caelicode/scripts -name "*.sh" -exec chmod +x {} + && \
     chmod +x /opt/caelicode/scripts/caelicode-update && \
     ln -sf /opt/caelicode/scripts/caelicode-update /usr/local/bin/caelicode-update && \
     ln -sf /opt/caelicode/scripts/health-check.sh /usr/local/bin/caelicode-health
@@ -150,11 +152,11 @@ COPY profiles/ /opt/caelicode/profiles/
 
 # Copy test suite
 COPY test/ /opt/caelicode/test/
-RUN chmod +x /opt/caelicode/test/*.sh 2>/dev/null || true
+RUN find /opt/caelicode/test -name "*.sh" -exec chmod +x {} +
 
 # ── Default shell: zsh ───────────────────────────────────────────────
 RUN chsh -s /bin/zsh root && \
-    sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd 2>/dev/null || true
+    { sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd 2>/dev/null || true; }
 
 # ── Default user ─────────────────────────────────────────────────────
 # Pre-create a default user during build so the distro is immediately
@@ -200,13 +202,13 @@ FROM base AS sre-image
 
 COPY profiles/sre.toml /opt/mise/config/config.toml
 RUN --mount=type=secret,id=github_token \
-    export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || echo "")" && export GITHUB_TOKEN && \
     mise install --env /opt/mise/config/config.toml && mise reshim
 
 # Bypass mise shims for profile-specific tools
 RUN for shim in /opt/mise/shims/*; do \
-        tool=$(basename "$shim"); \
-        real=$(mise which "$tool" 2>/dev/null); \
+        tool="$(basename "$shim")"; \
+        real="$(mise which "$tool" 2>/dev/null)"; \
         if [ -n "$real" ] && [ -x "$real" ] && [ ! -e "/opt/mise/bin/$tool" ]; then \
             ln -sf "$real" "/opt/mise/bin/$tool"; \
         fi; \
@@ -241,13 +243,13 @@ RUN apt-get update -q && apt-get install -y --no-install-recommends \
 
 COPY profiles/dev.toml /opt/mise/config/config.toml
 RUN --mount=type=secret,id=github_token \
-    export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || echo "")" && export GITHUB_TOKEN && \
     mise install --env /opt/mise/config/config.toml && mise reshim
 
 # Bypass mise shims for profile-specific tools
 RUN for shim in /opt/mise/shims/*; do \
-        tool=$(basename "$shim"); \
-        real=$(mise which "$tool" 2>/dev/null); \
+        tool="$(basename "$shim")"; \
+        real="$(mise which "$tool" 2>/dev/null)"; \
         if [ -n "$real" ] && [ -x "$real" ] && [ ! -e "/opt/mise/bin/$tool" ]; then \
             ln -sf "$real" "/opt/mise/bin/$tool"; \
         fi; \
@@ -272,13 +274,13 @@ RUN apt-get update -q && apt-get install -y --no-install-recommends \
 
 COPY profiles/data.toml /opt/mise/config/config.toml
 RUN --mount=type=secret,id=github_token \
-    export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || echo "")" && export GITHUB_TOKEN && \
     mise install --env /opt/mise/config/config.toml && mise reshim
 
 # Bypass mise shims for profile-specific tools
 RUN for shim in /opt/mise/shims/*; do \
-        tool=$(basename "$shim"); \
-        real=$(mise which "$tool" 2>/dev/null); \
+        tool="$(basename "$shim")"; \
+        real="$(mise which "$tool" 2>/dev/null)"; \
         if [ -n "$real" ] && [ -x "$real" ] && [ ! -e "/opt/mise/bin/$tool" ]; then \
             ln -sf "$real" "/opt/mise/bin/$tool"; \
         fi; \

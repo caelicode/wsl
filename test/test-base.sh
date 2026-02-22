@@ -16,7 +16,7 @@ check() {
 check_version() {
     local name="$1" cmd="$2"
     local ver
-    ver=$($cmd 2>&1 | head -1) || true
+    ver="$($cmd 2>&1 | head -1)" || true
     if [ -n "$ver" ]; then
         echo "  ✓ ${name}: ${ver}"; PASS=$((PASS + 1))
     else

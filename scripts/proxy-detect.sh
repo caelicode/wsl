@@ -15,13 +15,13 @@ log() { echo "[caelicode-proxy] $*"; }
 # ── Proxy Detection ─────────────────────────────────────────────────
 detect_windows_proxy() {
     local proxy_output
-    proxy_output=$(/mnt/c/windows/system32/netsh.exe winhttp show proxy 2>/dev/null | tr -d '\r' || true)
+    proxy_output="$(/mnt/c/windows/system32/netsh.exe winhttp show proxy 2>/dev/null | tr -d '\r' || true)"
 
     local proxy_server
-    proxy_server=$(echo "$proxy_output" | grep -i "Proxy Server" | sed 's/.*: *//' | tr -d ' ')
+    proxy_server="$(echo "$proxy_output" | grep -i "Proxy Server" | sed 's/.*: *//' | tr -d ' ')"
 
     local bypass_list
-    bypass_list=$(echo "$proxy_output" | grep -i "Bypass List" | sed 's/.*: *//' | tr -d ' ')
+    bypass_list="$(echo "$proxy_output" | grep -i "Bypass List" | sed 's/.*: *//' | tr -d ' ')"
 
     if [ -n "$proxy_server" ] && [ "$proxy_server" != "(none)" ]; then
         echo "$proxy_server"
@@ -65,10 +65,10 @@ merge_windows_certs() {
 
     # Export Windows root certs via PowerShell
     local cert_pem
-    cert_pem=$(/mnt/c/windows/system32/windowspowershell/v1.0/powershell.exe \
+    cert_pem="$(/mnt/c/windows/system32/windowspowershell/v1.0/powershell.exe \
         -NoProfile -NonInteractive -Command \
         'Get-ChildItem -Path Cert:\LocalMachine\Root | ForEach-Object { [System.Convert]::ToBase64String($_.RawData) }' \
-        2>/dev/null | tr -d '\r' || true)
+        2>/dev/null | tr -d '\r' || true)"
 
     if [ -n "$cert_pem" ]; then
         mkdir -p "$linux_cert_dir"
@@ -88,7 +88,7 @@ merge_windows_certs() {
 }
 
 # ── Main ─────────────────────────────────────────────────────────────
-PROXY=$(detect_windows_proxy || true)
+PROXY="$(detect_windows_proxy || true)"
 
 if [ -n "$PROXY" ]; then
     write_proxy_env "$PROXY"
@@ -98,7 +98,7 @@ fi
 
 # Merge CA certs if configured
 if [ -f /etc/caelicode/config.yaml ]; then
-    MERGE_CA=$(grep "merge_ca_certs:" /etc/caelicode/config.yaml 2>/dev/null | grep -c "true" || true)
+    MERGE_CA="$(grep "merge_ca_certs:" /etc/caelicode/config.yaml 2>/dev/null | grep -c "true" || true)"
     if [ "$MERGE_CA" -gt 0 ]; then
         merge_windows_certs
     fi

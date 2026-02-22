@@ -10,7 +10,7 @@ PASS=0; FAIL=0
 check_version() {
     local name="$1" cmd="$2"
     local ver
-    ver=$($cmd 2>&1 | head -1) || true
+    ver="$($cmd 2>&1 | head -1)" || true
     if [ -n "$ver" ]; then
         echo "  ✓ ${name}: ${ver}"; PASS=$((PASS + 1))
     else
@@ -54,7 +54,7 @@ check_version "gcloud" "gcloud --version"
 check_version "trivy" "trivy --version"
 
 # Profile marker
-PROFILE=$(cat /opt/caelicode/PROFILE 2>/dev/null || echo "unknown")
+PROFILE="$(cat /opt/caelicode/PROFILE 2>/dev/null || echo "unknown")"
 if [ "$PROFILE" = "sre" ]; then
     echo "  ✓ Profile marker: sre"; PASS=$((PASS + 1))
 else

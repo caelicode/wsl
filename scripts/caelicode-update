@@ -19,7 +19,7 @@ SKEL_DIR="/etc/skel"
 MISE_CONFIG="/opt/mise/config/config.toml"
 VERSION_FILE="${INSTALL_DIR}/VERSION"
 PROFILE_FILE="${INSTALL_DIR}/PROFILE"
-TEMP_DIR=$(mktemp -d)
+TEMP_DIR="$(mktemp -d)"
 
 # shellcheck disable=SC2064
 trap "rm -rf $TEMP_DIR" EXIT
@@ -74,8 +74,8 @@ HELP
 done
 
 # ── Version / Profile Info ───────────────────────────────────────────
-CURRENT_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || echo "unknown")
-CURRENT_PROFILE=$(cat "$PROFILE_FILE" 2>/dev/null || echo "unknown")
+CURRENT_VERSION="$(cat "$VERSION_FILE" 2>/dev/null || echo "unknown")"
+CURRENT_PROFILE="$(cat "$PROFILE_FILE" 2>/dev/null || echo "unknown")"
 
 if $SHOW_VERSION; then
     echo "CaeliCode WSL ${CURRENT_VERSION}"
@@ -123,7 +123,7 @@ fi
 # ── Check for Updates ────────────────────────────────────────────────
 log "Current version: ${CURRENT_VERSION} (${CURRENT_PROFILE} profile)"
 
-RELEASE_JSON=$(curl -sf "https://api.github.com/repos/${REPO}/releases/latest" || true)
+RELEASE_JSON="$(curl -sf "https://api.github.com/repos/${REPO}/releases/latest" || true)"
 
 if [ -z "$RELEASE_JSON" ]; then
     err "Failed to fetch release info from GitHub"
@@ -131,8 +131,8 @@ if [ -z "$RELEASE_JSON" ]; then
     exit 1
 fi
 
-LATEST_VERSION=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null || echo "")
-CHANGELOG=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body',''))" 2>/dev/null || echo "")
+LATEST_VERSION="$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null || echo "")"
+CHANGELOG="$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body',''))" 2>/dev/null || echo "")"
 
 if [ -z "$LATEST_VERSION" ]; then
     err "Could not determine latest version"
@@ -179,7 +179,7 @@ fi
 
 tar xzf source.tar.gz
 # GitHub extracts to: wsl-<version-without-v>/ e.g. wsl-0.4.0/
-EXTRACT_DIR=$(ls -d wsl-*/ 2>/dev/null | head -1)
+EXTRACT_DIR="$(ls -d wsl-*/ 2>/dev/null | head -1)"
 
 if [ -z "$EXTRACT_DIR" ] || [ ! -d "$EXTRACT_DIR" ]; then
     err "Could not find extracted source directory"
@@ -194,8 +194,8 @@ log "Extracted to ${EXTRACT_DIR}"
 if [ -d "${EXTRACT_DIR}scripts" ]; then
     log "Updating scripts..."
     sudo cp -r "${EXTRACT_DIR}scripts/"* "${INSTALL_DIR}/scripts/"
-    sudo chmod +x "${INSTALL_DIR}/scripts/"*.sh 2>/dev/null || true
-    sudo chmod +x "${INSTALL_DIR}/scripts/caelicode-update" 2>/dev/null || true
+    sudo find "${INSTALL_DIR}/scripts" -name "*.sh" -exec chmod +x {} +
+    sudo chmod +x "${INSTALL_DIR}/scripts/caelicode-update"
     log "  ✓ Scripts updated"
 fi
 

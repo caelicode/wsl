@@ -106,13 +106,13 @@ jobs:
 
       - name: ShellCheck scripts
         run: |
-          shellcheck -x scripts/*.sh build.sh test/*.sh || true
+          shellcheck -x scripts/*.sh scripts/caelicode-update build.sh test/*.sh
 
       - name: Validate Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
-          failure-threshold: error
+          failure-threshold: warning
 
   release:
     name: Semantic Release

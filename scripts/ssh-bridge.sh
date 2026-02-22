@@ -25,7 +25,7 @@ find_npiperelay() {
         "/mnt/c/Users/*/scoop/shims/npiperelay.exe"; do
         # shellcheck disable=SC2086
         local found
-        found=$(ls $path 2>/dev/null | head -1)
+        found="$(ls $path 2>/dev/null | head -1)"
         if [ -n "$found" ] && [ -x "$found" ]; then
             echo "$found"
             return 0
@@ -39,7 +39,7 @@ if ! command -v socat &>/dev/null; then
     exit 1
 fi
 
-NPIPERELAY=$(find_npiperelay || true)
+NPIPERELAY="$(find_npiperelay || true)"
 if [ -z "$NPIPERELAY" ]; then
     log "WARNING: npiperelay.exe not found — SSH agent bridge unavailable"
     log "Install it: go install github.com/jstarks/npiperelay@latest"
