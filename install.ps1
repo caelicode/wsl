@@ -261,13 +261,26 @@ try {
     Get-EventSubscriber | Unregister-Event -Force 2>$null
 }
 
-# Download checksum
-try {
-    Invoke-WebRequest -Uri $shaAsset.browser_download_url -OutFile $shaPath -Headers @{
-        'User-Agent' = 'CaeliCode-WSL-Installer'
+# Download checksum (with retry — GitHub CDN can be flaky)
+$shaDownloaded = $false
+for ($retry = 1; $retry -le 3; $retry++) {
+    try {
+        Invoke-WebRequest -Uri $shaAsset.browser_download_url -OutFile $shaPath -Headers @{
+            'User-Agent' = 'CaeliCode-WSL-Installer'
+        }
+        $shaDownloaded = $true
+        break
+    } catch {
+        if ($retry -lt 3) {
+            Write-Host "    Checksum download failed, retrying ($retry/3)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+        }
     }
-} catch {
-    Write-Fail "Failed to download checksum file: $_"
+}
+if (-not $shaDownloaded) {
+    Write-Fail "Failed to download checksum file after 3 attempts."
+    Write-Host "    The image was downloaded but cannot be verified." -ForegroundColor Yellow
+    Write-Host "    Please try running the installer again." -ForegroundColor Yellow
     return
 }
 
@@ -309,7 +322,49 @@ Write-Success "Distro imported successfully"
 Remove-Item $tempDir -Recurse -Force
 Write-Success "Cleaned up temp files"
 
-# ── 12. First launch info ───────────────────────────────────────────
+# ── 12. Install Nerd Font for Starship prompt icons ──────────────────
+$fontName = "MesloLGS NF"
+$fontInstalled = Test-Path "C:\Windows\Fonts\MesloLGS NF Regular.ttf"
+if (-not $fontInstalled) {
+    Write-Step "Installing $fontName font for terminal icons..."
+
+    $fontBaseUrl = "https://github.com/romkatv/powerlevel10k-media/raw/master"
+    $fonts = @(
+        @{ Name = "MesloLGS NF Regular.ttf";      Url = "$fontBaseUrl/MesloLGS%20NF%20Regular.ttf" }
+        @{ Name = "MesloLGS NF Bold.ttf";          Url = "$fontBaseUrl/MesloLGS%20NF%20Bold.ttf" }
+        @{ Name = "MesloLGS NF Italic.ttf";        Url = "$fontBaseUrl/MesloLGS%20NF%20Italic.ttf" }
+        @{ Name = "MesloLGS NF Bold Italic.ttf";   Url = "$fontBaseUrl/MesloLGS%20NF%20Bold%20Italic.ttf" }
+    )
+
+    $fontSuccess = $true
+    foreach ($font in $fonts) {
+        $fontTemp = Join-Path $env:TEMP $font.Name
+        try {
+            Invoke-WebRequest -Uri $font.Url -OutFile $fontTemp -Headers @{
+                'User-Agent' = 'CaeliCode-WSL-Installer'
+            }
+            Copy-Item $fontTemp "C:\Windows\Fonts\" -Force
+            New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" `
+                -Name "$($font.Name -replace '\.ttf$', '') (TrueType)" `
+                -Value $font.Name -PropertyType String -Force | Out-Null
+            Remove-Item $fontTemp -Force 2>$null
+        } catch {
+            $fontSuccess = $false
+        }
+    }
+
+    if ($fontSuccess) {
+        Write-Success "$fontName installed"
+        Write-Host "    Set it in Windows Terminal: Settings > Profiles > Appearance > Font face" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  ! Font install failed (non-critical) — icons may show as '?'" -ForegroundColor Yellow
+        Write-Host "    Download manually from: https://github.com/romkatv/powerlevel10k#fonts" -ForegroundColor DarkGray
+    }
+} else {
+    Write-Success "$fontName already installed"
+}
+
+# ── 13. First launch info ───────────────────────────────────────────
 Write-Host ""
 Write-Host "  ╔═══════════════════════════════════════════╗" -ForegroundColor Green
 Write-Host "  ║       Installation Complete!               ║" -ForegroundColor Green
