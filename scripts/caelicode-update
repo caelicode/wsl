@@ -196,6 +196,13 @@ if [ -d "${EXTRACT_DIR}scripts" ]; then
     sudo cp -r "${EXTRACT_DIR}scripts/"* "${INSTALL_DIR}/scripts/"
     sudo find "${INSTALL_DIR}/scripts" -name "*.sh" -exec chmod +x {} +
     sudo chmod +x "${INSTALL_DIR}/scripts/caelicode-update"
+    # Ensure all executable scripts are symlinked into PATH
+    sudo ln -sf "${INSTALL_DIR}/scripts/caelicode-update" /usr/local/bin/caelicode-update
+    sudo ln -sf "${INSTALL_DIR}/scripts/health-check.sh" /usr/local/bin/caelicode-health
+    if [ -f "${INSTALL_DIR}/scripts/code" ]; then
+        sudo chmod +x "${INSTALL_DIR}/scripts/code"
+        sudo ln -sf "${INSTALL_DIR}/scripts/code" /usr/local/bin/code
+    fi
     log "  ✓ Scripts updated"
 fi
 
