@@ -17,26 +17,30 @@ find_code_cli() {
         /mnt/c/Windows/System32/cmd.exe /C "echo %USERNAME%" 2>/dev/null | tr -d '\r'
     )" || true
 
-    # Candidate locations (user install, system install, scoop, winget)
-    local candidates=()
+    # Base directories to probe (user install, system install, scoop)
+    local dirs=()
 
     if [ -n "${win_user:-}" ]; then
-        candidates+=(
-            "/mnt/c/Users/${win_user}/AppData/Local/Programs/Microsoft VS Code/bin/code"
-            "/mnt/c/Users/${win_user}/scoop/apps/vscode/current/bin/code"
+        dirs+=(
+            "/mnt/c/Users/${win_user}/AppData/Local/Programs/Microsoft VS Code/bin"
+            "/mnt/c/Users/${win_user}/scoop/apps/vscode/current/bin"
         )
     fi
 
-    candidates+=(
-        "/mnt/c/Program Files/Microsoft VS Code/bin/code"
-        "/mnt/c/Program Files (x86)/Microsoft VS Code/bin/code"
+    dirs+=(
+        "/mnt/c/Program Files/Microsoft VS Code/bin"
+        "/mnt/c/Program Files (x86)/Microsoft VS Code/bin"
     )
 
-    for candidate in "${candidates[@]}"; do
-        if [ -f "$candidate" ]; then
-            echo "$candidate"
-            return 0
-        fi
+    # For each directory, check code.cmd first (most common on Windows),
+    # then the extensionless script.
+    for dir in "${dirs[@]}"; do
+        for name in code.cmd code; do
+            if [ -f "${dir}/${name}" ]; then
+                echo "${dir}/${name}"
+                return 0
+            fi
+        done
     done
 
     return 1
