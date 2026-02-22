@@ -3,6 +3,11 @@
 # If not running interactively, don't do anything
 [[ -o interactive ]] || return
 
+# ── Start in home directory ──────────────────────────────────────
+# WSL inherits the Windows CWD (e.g. /mnt/c/Windows/System32) which
+# causes starship and other tools to scan slowly over the 9P mount.
+[[ "$PWD" == /mnt/* ]] && cd ~
+
 # ── PATH (must come first) ───────────────────────────────────────
 export PATH="/opt/mise/bin:/opt/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 

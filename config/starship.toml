@@ -1,6 +1,10 @@
 # CaeliCode WSL — Starship Prompt Configuration
 # https://starship.rs/config/
 
+# Low timeout prevents slow scans on Windows-mounted directories (/mnt/c)
+scan_timeout = 500
+command_timeout = 1000
+
 format = """
 [╭─](bold cyan) $username$hostname$directory$git_branch$git_status$kubernetes$aws$azure$gcloud$python$nodejs$golang$rust$java$docker_context$cmd_duration
 [╰─](bold cyan) $character"""
