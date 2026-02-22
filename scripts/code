@@ -11,19 +11,28 @@ set -euo pipefail
 CACHE_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/caelicode-vscode-path"
 
 find_code_cli() {
-    # Get Windows username via environment or wslvar
-    local win_user
-    win_user="$(
-        /mnt/c/Windows/System32/cmd.exe /C "echo %USERNAME%" 2>/dev/null | tr -d '\r'
+    # Get the Windows user profile path (e.g. C:\Users\bertr).
+    # %USERPROFILE% is more reliable than %USERNAME% because the display
+    # name can differ from the profile folder name (e.g. after a rename).
+    local win_profile
+    win_profile="$(
+        /mnt/c/Windows/System32/cmd.exe /C "echo %USERPROFILE%" 2>/dev/null | tr -d '\r'
     )" || true
+
+    # Convert Windows path to WSL mount path (C:\Users\bertr → /mnt/c/Users/bertr)
+    local wsl_profile=""
+    if [ -n "${win_profile:-}" ]; then
+        # Replace backslashes, convert drive letter to lowercase /mnt/<drive>/
+        wsl_profile="$(echo "$win_profile" | sed -e 's|\\|/|g' -e 's|^\([A-Za-z]\):|/mnt/\L\1|')"
+    fi
 
     # Base directories to probe (user install, system install, scoop)
     local dirs=()
 
-    if [ -n "${win_user:-}" ]; then
+    if [ -n "${wsl_profile:-}" ] && [ -d "$wsl_profile" ]; then
         dirs+=(
-            "/mnt/c/Users/${win_user}/AppData/Local/Programs/Microsoft VS Code/bin"
-            "/mnt/c/Users/${win_user}/scoop/apps/vscode/current/bin"
+            "${wsl_profile}/AppData/Local/Programs/Microsoft VS Code/bin"
+            "${wsl_profile}/scoop/apps/vscode/current/bin"
         )
     fi
 
