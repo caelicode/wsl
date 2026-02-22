@@ -60,6 +60,48 @@ sudo cp your-corp-ca.crt /usr/local/share/ca-certificates/
 sudo update-ca-certificates
 ```
 
+## Shell Hangs on Launch (Blinking Cursor)
+
+**Symptom:** `wsl -d caelicode-sre` shows a blinking cursor and never produces a prompt.
+
+**Root cause:** WSL inherits the Windows working directory (e.g. `/mnt/c/Windows/System32`) and appends Windows PATH directories by default. Tools like starship and zsh's completion system scan these directories over the slow 9P mount, causing multi-second delays or apparent hangs.
+
+**CaeliCode prevents this by default** via three mechanisms:
+1. `appendWindowsPath = false` in `/etc/wsl.conf` (prevents Windows PATH pollution)
+2. `cd ~` guard in `.zshrc` (avoids starting in a `/mnt/c/` directory)
+3. `scan_timeout = 500` in starship.toml (prevents starship from blocking on slow directories)
+
+**If you still experience hangs**, try:
+
+```powershell
+# Fully restart WSL (changes to wsl.conf require this)
+wsl --shutdown
+# Wait a few seconds, then relaunch
+wsl -d caelicode-sre
+```
+
+If that doesn't help, test with a bare shell to isolate whether `.zshrc` is the problem:
+
+```powershell
+wsl -d caelicode-sre -- /bin/bash --noprofile --norc
+```
+
+If the bare shell works but zsh hangs, the issue is in `.zshrc` — check starship and mise initialization.
+
+## Windows Tools Not Found (code, docker.exe, etc.)
+
+**Symptom:** `code .` or other Windows commands don't work inside WSL.
+
+**By design:** CaeliCode disables `appendWindowsPath` in `/etc/wsl.conf` to prevent shell startup slowness. If you need specific Windows tools, add them to your PATH manually:
+
+```bash
+# Add VS Code
+export PATH="$PATH:/mnt/c/Users/$USER/AppData/Local/Programs/Microsoft VS Code/bin"
+
+# Add to ~/.zshrc to persist
+echo 'export PATH="$PATH:/mnt/c/Users/YOUR_USERNAME/AppData/Local/Programs/Microsoft VS Code/bin"' >> ~/.zshrc
+```
+
 ## Tool Not Found After Install
 
 **Symptom:** `kubectl` or other tools show "command not found" even though the profile should include them.

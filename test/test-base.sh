@@ -48,6 +48,9 @@ check_version "direnv" "direnv --version"
 check_version "zoxide" "zoxide --version"
 check_version "yq" "yq --version"
 
+# Starship shim bypass (real binary symlinked to /opt/mise/bin/)
+check "starship symlink in /opt/mise/bin" test -x /opt/mise/bin/starship
+
 # Oh My Zsh
 check "oh-my-zsh installed" test -d /opt/oh-my-zsh
 check "zsh-autosuggestions plugin" test -d /opt/oh-my-zsh/custom/plugins/zsh-autosuggestions
@@ -69,6 +72,7 @@ check "bash_aliases in skel" test -f /etc/skel/.bash_aliases
 check "zshrc in skel" test -f /etc/skel/.zshrc
 
 # WSL config
+check "appendWindowsPath disabled" grep -q "appendWindowsPath = false" /etc/wsl.conf
 check "default user in wsl.conf" grep -q "default = caelicode" /etc/wsl.conf
 check "caelicode user exists" getent passwd caelicode
 check "caelicode user has zsh shell" grep -q "caelicode.*zsh" /etc/passwd
