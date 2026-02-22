@@ -28,9 +28,9 @@ section() { $QUIET || echo -e "\n── $* ──"; }
 # ── System ───────────────────────────────────────────────────────────
 section "System"
 
-[ -f /opt/caelicode/VERSION ] && pass "Version: $(cat /opt/caelicode/VERSION)" || fail "Version file missing"
-[ -f /opt/caelicode/PROFILE ] && pass "Profile: $(cat /opt/caelicode/PROFILE)" || fail "Profile file missing"
-[ -f /etc/caelicode/config.yaml ] && pass "Config: /etc/caelicode/config.yaml" || warn "Config file missing"
+if [ -f /opt/caelicode/VERSION ]; then pass "Version: $(cat /opt/caelicode/VERSION)"; else fail "Version file missing"; fi
+if [ -f /opt/caelicode/PROFILE ]; then pass "Profile: $(cat /opt/caelicode/PROFILE)"; else fail "Profile file missing"; fi
+if [ -f /etc/caelicode/config.yaml ]; then pass "Config: /etc/caelicode/config.yaml"; else warn "Config file missing"; fi
 
 # ── Tools ────────────────────────────────────────────────────────────
 section "Tools"

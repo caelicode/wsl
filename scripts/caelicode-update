@@ -179,9 +179,9 @@ fi
 
 tar xzf source.tar.gz
 # GitHub extracts to: wsl-<version-without-v>/ e.g. wsl-0.4.0/
-EXTRACT_DIR="$(ls -d wsl-*/ 2>/dev/null | head -1)"
+EXTRACT_DIR="$(find . -maxdepth 1 -type d -name 'wsl-*' -print -quit)/"
 
-if [ -z "$EXTRACT_DIR" ] || [ ! -d "$EXTRACT_DIR" ]; then
+if [ -z "$EXTRACT_DIR" ] || [ "$EXTRACT_DIR" = "/" ] || [ ! -d "$EXTRACT_DIR" ]; then
     err "Could not find extracted source directory"
     exit 1
 fi

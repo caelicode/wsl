@@ -20,11 +20,12 @@ detect_windows_proxy() {
     local proxy_server
     proxy_server="$(echo "$proxy_output" | grep -i "Proxy Server" | sed 's/.*: *//' | tr -d ' ')"
 
-    local bypass_list
-    bypass_list="$(echo "$proxy_output" | grep -i "Bypass List" | sed 's/.*: *//' | tr -d ' ')"
-
     if [ -n "$proxy_server" ] && [ "$proxy_server" != "(none)" ]; then
+        local bypass_list
+        bypass_list="$(echo "$proxy_output" | grep -i "Bypass List" | sed 's/.*: *//' | tr -d ' ')"
+        # Output proxy and bypass separated by a newline
         echo "$proxy_server"
+        echo "${bypass_list:-}"
         return 0
     fi
     return 1
@@ -60,10 +61,10 @@ PROXYEOF
 
 # ── CA Certificate Merge ─────────────────────────────────────────────
 merge_windows_certs() {
-    local win_cert_dir="/mnt/c/ProgramData"
     local linux_cert_dir="/usr/local/share/ca-certificates/caelicode"
 
     # Export Windows root certs via PowerShell
+    # shellcheck disable=SC2016  # Single quotes intentional: PowerShell Cert:\ path
     local cert_pem
     cert_pem="$(/mnt/c/windows/system32/windowspowershell/v1.0/powershell.exe \
         -NoProfile -NonInteractive -Command \
@@ -76,9 +77,11 @@ merge_windows_certs() {
         : > "$cert_file"
         while IFS= read -r b64; do
             [ -z "$b64" ] && continue
-            echo "-----BEGIN CERTIFICATE-----" >> "$cert_file"
-            echo "$b64" | fold -w 64 >> "$cert_file"
-            echo "-----END CERTIFICATE-----" >> "$cert_file"
+            {
+                echo "-----BEGIN CERTIFICATE-----"
+                echo "$b64" | fold -w 64
+                echo "-----END CERTIFICATE-----"
+            } >> "$cert_file"
         done <<< "$cert_pem"
         update-ca-certificates 2>/dev/null || true
         log "Merged Windows root CA certificates into Linux trust store"
@@ -88,10 +91,12 @@ merge_windows_certs() {
 }
 
 # ── Main ─────────────────────────────────────────────────────────────
-PROXY="$(detect_windows_proxy || true)"
+PROXY_OUTPUT="$(detect_windows_proxy || true)"
 
-if [ -n "$PROXY" ]; then
-    write_proxy_env "$PROXY"
+if [ -n "$PROXY_OUTPUT" ]; then
+    PROXY="$(echo "$PROXY_OUTPUT" | head -1)"
+    BYPASS="$(echo "$PROXY_OUTPUT" | tail -1)"
+    write_proxy_env "$PROXY" "$BYPASS"
 else
     clear_proxy_env
 fi
