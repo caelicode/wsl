@@ -16,11 +16,9 @@ shopt -s globstar 2>/dev/null
 # Less: make it friendlier for non-text input files
 [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
 
-# ── Mise (Tool Version Manager) ─────────────────────────────────────
-# Shims are already in PATH via /etc/profile.d/00-caelicode-env.sh.
-# We do NOT use `mise activate` because its hook-env runs on every
-# prompt and can hang in WSL2. See: https://github.com/jdx/mise/discussions/4821
-export PATH="/opt/mise/bin:/opt/mise/shims:$PATH"
+# ── PATH ─────────────────────────────────────────────────────────────
+# NO mise shims — all tools are symlinked into /opt/mise/bin/ at build time.
+export PATH="/opt/mise/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # ── Starship Prompt ──────────────────────────────────────────────────
 export STARSHIP_CONFIG="/etc/caelicode/starship.toml"
@@ -35,9 +33,9 @@ else
     }
 
     _k8s_context() {
-        if command -v kubectl &>/dev/null; then
+        if [[ -x /opt/mise/bin/kubectl ]]; then
             local ctx
-            ctx=$(kubectl config current-context 2>/dev/null)
+            ctx=$(/opt/mise/bin/kubectl config current-context 2>/dev/null)
             [ -n "$ctx" ] && echo " ⎈${ctx}"
         fi
     }
@@ -46,18 +44,18 @@ else
 fi
 
 # ── Zoxide (smart cd) ────────────────────────────────────────────────
-if command -v zoxide &>/dev/null; then
-    eval "$(zoxide init bash)"
+if [[ -x /opt/mise/bin/zoxide ]]; then
+    eval "$(/opt/mise/bin/zoxide init bash)"
 fi
 
 # ── Direnv ────────────────────────────────────────────────────────────
-if command -v direnv &>/dev/null; then
-    eval "$(direnv hook bash)"
+if [[ -x /opt/mise/bin/direnv ]]; then
+    eval "$(/opt/mise/bin/direnv hook bash)"
 fi
 
 # ── FZF Integration ──────────────────────────────────────────────────
-if command -v fzf &>/dev/null; then
-    eval "$(fzf --bash 2>/dev/null)" || true
+if [[ -x /opt/mise/bin/fzf ]]; then
+    eval "$(/opt/mise/bin/fzf --bash 2>/dev/null)" || true
 fi
 
 # ── CaeliCode MOTD ───────────────────────────────────────────────────
@@ -89,12 +87,12 @@ if ! shopt -oq posix; then
 fi
 
 # Kubectl completion (SRE profile)
-if command -v kubectl &>/dev/null; then
-    source <(kubectl completion bash 2>/dev/null)
+if [[ -x /opt/mise/bin/kubectl ]]; then
+    source <(/opt/mise/bin/kubectl completion bash 2>/dev/null)
     complete -o default -F __start_kubectl k
 fi
 
 # Helm completion (SRE profile)
-if command -v helm &>/dev/null; then
-    source <(helm completion bash 2>/dev/null)
+if [[ -x /opt/mise/bin/helm ]]; then
+    source <(/opt/mise/bin/helm completion bash 2>/dev/null)
 fi

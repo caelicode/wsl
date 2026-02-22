@@ -74,6 +74,9 @@ RUN git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git /opt/oh-my-zsh &&
 ENV MISE_DATA_DIR=/opt/mise
 ENV XDG_DATA_HOME=/opt/mise
 ENV MISE_CONFIG_DIR=/opt/mise/config
+# Shims are in PATH during build only (for mise reshim to work).
+# At runtime in WSL, shims are NOT in PATH — direct symlinks in
+# /opt/mise/bin/ are used instead (see shim bypass step below).
 ENV PATH="/opt/mise/bin:/opt/mise/shims:$PATH"
 
 RUN install -dm 755 /etc/apt/keyrings && \
@@ -92,10 +95,22 @@ RUN --mount=type=secret,id=github_token \
     export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
     mise install --env /opt/mise/config/config.toml && mise reshim
 
+# ── Bypass ALL mise shims ────────────────────────────────────────
+# Mise shims hang in WSL (they invoke mise's version resolution which
+# attempts network calls and hangs on DNS/timeout). Replace every shim
+# with a direct symlink to the real binary in /opt/mise/bin/.
+# This runs at build time when mise env vars are available.
+RUN for shim in /opt/mise/shims/*; do \
+        tool=$(basename "$shim"); \
+        real=$(mise which "$tool" 2>/dev/null); \
+        if [ -n "$real" ] && [ -x "$real" ]; then \
+            ln -sf "$real" "/opt/mise/bin/$tool"; \
+        fi; \
+    done
+
 # ── Starship prompt (direct install — NOT via mise) ──────────────
-# The mise shim for starship hangs indefinitely in WSL during both
-# `starship init zsh` and prompt rendering. Install starship directly
-# to /usr/local/bin/ using the official installer to avoid this.
+# Starship is installed separately because it was removed from the
+# mise config to avoid shim issues.
 # See: https://starship.rs/guide/#step-1-install-starship
 RUN curl -sS https://starship.rs/install.sh | sh -s -- --yes --bin-dir /usr/local/bin
 
@@ -156,7 +171,7 @@ RUN useradd -ms /bin/zsh caelicode && \
 # Docker ENV is lost on `docker export` → `wsl --import`. Write PATH and
 # other critical vars to /etc/environment (read by WSL on boot) and
 # /etc/profile.d/ (sourced by login shells) so tools are always available.
-RUN echo 'PATH="/opt/mise/bin:/opt/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/environment && \
+RUN echo 'PATH="/opt/mise/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/environment && \
     echo 'MISE_DATA_DIR="/opt/mise"' >> /etc/environment && \
     echo 'MISE_CONFIG_DIR="/opt/mise/config"' >> /etc/environment && \
     echo 'STARSHIP_CONFIG="/etc/caelicode/starship.toml"' >> /etc/environment
@@ -187,6 +202,15 @@ COPY profiles/sre.toml /opt/mise/config/config.toml
 RUN --mount=type=secret,id=github_token \
     export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
     mise install --env /opt/mise/config/config.toml && mise reshim
+
+# Bypass mise shims for profile-specific tools
+RUN for shim in /opt/mise/shims/*; do \
+        tool=$(basename "$shim"); \
+        real=$(mise which "$tool" 2>/dev/null); \
+        if [ -n "$real" ] && [ -x "$real" ] && [ ! -e "/opt/mise/bin/$tool" ]; then \
+            ln -sf "$real" "/opt/mise/bin/$tool"; \
+        fi; \
+    done
 
 # Azure CLI (official Microsoft apt repository)
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash && \
@@ -220,6 +244,15 @@ RUN --mount=type=secret,id=github_token \
     export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
     mise install --env /opt/mise/config/config.toml && mise reshim
 
+# Bypass mise shims for profile-specific tools
+RUN for shim in /opt/mise/shims/*; do \
+        tool=$(basename "$shim"); \
+        real=$(mise which "$tool" 2>/dev/null); \
+        if [ -n "$real" ] && [ -x "$real" ] && [ ! -e "/opt/mise/bin/$tool" ]; then \
+            ln -sf "$real" "/opt/mise/bin/$tool"; \
+        fi; \
+    done
+
 ARG VERSION=dev
 RUN echo "dev" > /opt/caelicode/PROFILE && \
     echo "${VERSION}" > /opt/caelicode/VERSION
@@ -242,10 +275,19 @@ RUN --mount=type=secret,id=github_token \
     export GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
     mise install --env /opt/mise/config/config.toml && mise reshim
 
+# Bypass mise shims for profile-specific tools
+RUN for shim in /opt/mise/shims/*; do \
+        tool=$(basename "$shim"); \
+        real=$(mise which "$tool" 2>/dev/null); \
+        if [ -n "$real" ] && [ -x "$real" ] && [ ! -e "/opt/mise/bin/$tool" ]; then \
+            ln -sf "$real" "/opt/mise/bin/$tool"; \
+        fi; \
+    done
+
 # Install Python data tools via uv (after mise installs uv)
 ENV UV_TOOL_BIN_DIR=/usr/local/bin
-RUN /opt/mise/shims/uv tool install dbt-core --with dbt-postgres && \
-    /opt/mise/shims/uv tool install jupyterlab
+RUN /opt/mise/bin/uv tool install dbt-core --with dbt-postgres && \
+    /opt/mise/bin/uv tool install jupyterlab
 
 ARG VERSION=dev
 RUN echo "data" > /opt/caelicode/PROFILE && \

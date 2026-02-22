@@ -9,9 +9,10 @@
 [[ "$PWD" == /mnt/* ]] && cd ~
 
 # ── PATH ─────────────────────────────────────────────────────────
-# Set a clean Linux-only PATH. Windows paths are excluded via
-# appendWindowsPath=false in /etc/wsl.conf to avoid 9P overhead.
-export PATH="/opt/mise/bin:/opt/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# Clean Linux-only PATH. NO mise shims — all tools are symlinked
+# into /opt/mise/bin/ at build time. Windows paths excluded via
+# appendWindowsPath=false in /etc/wsl.conf.
+export PATH="/opt/mise/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # ── History ──────────────────────────────────────────────────────
 HISTSIZE=10000
@@ -31,42 +32,33 @@ DISABLE_MAGIC_FUNCTIONS=true
 plugins=(git)
 [[ -d "$ZSH/custom/plugins/zsh-autosuggestions" ]] && plugins+=(zsh-autosuggestions)
 [[ -d "$ZSH/custom/plugins/zsh-syntax-highlighting" ]] && plugins+=(zsh-syntax-highlighting)
-command -v kubectl &>/dev/null && plugins+=(kubectl)
-command -v terraform &>/dev/null && plugins+=(terraform)
+[[ -x /opt/mise/bin/kubectl ]] && plugins+=(kubectl)
+[[ -x /opt/mise/bin/terraform ]] && plugins+=(terraform)
 command -v docker &>/dev/null && plugins+=(docker)
 
 if [[ -f "$ZSH/oh-my-zsh.sh" ]]; then
     source "$ZSH/oh-my-zsh.sh"
 fi
 
-# ── Mise (Tool Version Manager) ─────────────────────────────────
-# Shims in /opt/mise/shims/ are already in PATH (set above). This
-# is sufficient for running all mise-managed tools. We intentionally
-# do NOT use `mise activate` because its hook-env runs on every
-# prompt and can hang in WSL2 (network timeouts, remote version
-# checks). See: https://github.com/jdx/mise/discussions/4821
-
 # ── Starship Prompt ─────────────────────────────────────────────
-# Starship is installed directly to /usr/local/bin/ (not via mise)
-# to avoid the mise shim hang in WSL.
 export STARSHIP_CONFIG="/etc/caelicode/starship.toml"
 if [[ -x /usr/local/bin/starship ]]; then
     eval "$(/usr/local/bin/starship init zsh)"
 fi
 
 # ── Zoxide (smart cd) ───────────────────────────────────────────
-if command -v zoxide &>/dev/null; then
-    eval "$(zoxide init zsh)"
+if [[ -x /opt/mise/bin/zoxide ]]; then
+    eval "$(/opt/mise/bin/zoxide init zsh)"
 fi
 
 # ── Direnv ───────────────────────────────────────────────────────
-if command -v direnv &>/dev/null; then
-    eval "$(direnv hook zsh)"
+if [[ -x /opt/mise/bin/direnv ]]; then
+    eval "$(/opt/mise/bin/direnv hook zsh)"
 fi
 
 # ── FZF Integration ─────────────────────────────────────────────
-if command -v fzf &>/dev/null; then
-    source <(fzf --zsh 2>/dev/null) || true
+if [[ -x /opt/mise/bin/fzf ]]; then
+    source <(/opt/mise/bin/fzf --zsh 2>/dev/null) || true
 fi
 
 # ── Aliases ──────────────────────────────────────────────────────
