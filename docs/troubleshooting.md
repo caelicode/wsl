@@ -88,18 +88,46 @@ wsl -d caelicode-sre -- /bin/bash --noprofile --norc
 
 If the bare shell works but zsh hangs, the issue is in `.zshrc` — check starship and mise initialization.
 
-## Windows Tools Not Found (code, docker.exe, etc.)
+## `code .` Not Working
 
-**Symptom:** `code .` or other Windows commands don't work inside WSL.
+**Symptom:** `code .` says "command not found" or "VS Code not found on the Windows side."
 
-**By design:** CaeliCode disables `appendWindowsPath` in `/etc/wsl.conf` to prevent shell startup slowness. If you need specific Windows tools, add them to your PATH manually:
+CaeliCode ships a `code` wrapper that finds VS Code on Windows without needing `appendWindowsPath=true`. If it's not working:
+
+**"command not found"** — the wrapper isn't symlinked into PATH. Run:
 
 ```bash
-# Add VS Code
-export PATH="$PATH:/mnt/c/Users/$USER/AppData/Local/Programs/Microsoft VS Code/bin"
+sudo ln -sf /opt/caelicode/scripts/code /usr/local/bin/code
+```
 
-# Add to ~/.zshrc to persist
-echo 'export PATH="$PATH:/mnt/c/Users/YOUR_USERNAME/AppData/Local/Programs/Microsoft VS Code/bin"' >> ~/.zshrc
+If the script itself is missing, update first: `caelicode-update`
+
+**"VS Code not found"** — the wrapper couldn't locate VS Code. Verify it's installed on Windows and check the detected path:
+
+```bash
+# Check what path the wrapper resolves
+/mnt/c/Windows/System32/cmd.exe /C "echo %USERPROFILE%" 2>/dev/null | tr -d '\r'
+```
+
+If your Windows display name differs from your profile folder name (e.g. you renamed your Windows account), make sure the wrapper uses `%USERPROFILE%` — update to v0.9.1+ which handles this correctly.
+
+**Clear the cached path** if VS Code was moved or reinstalled:
+
+```bash
+rm -f ~/.cache/caelicode-vscode-path
+code .
+```
+
+## Other Windows Tools Not Found (docker.exe, explorer.exe, etc.)
+
+**By design:** CaeliCode disables `appendWindowsPath` in `/etc/wsl.conf` to prevent shell startup slowness and mise shim hangs. VS Code has a built-in wrapper (see above), but other Windows tools need to be added manually:
+
+```bash
+# Example: add docker.exe to PATH
+export PATH="$PATH:/mnt/c/Program Files/Docker/Docker/resources/bin"
+
+# Persist in ~/.zshrc
+echo 'export PATH="$PATH:/mnt/c/Program Files/Docker/Docker/resources/bin"' >> ~/.zshrc
 ```
 
 ## Tool Not Found After Install
@@ -113,19 +141,18 @@ mise list
 mise doctor
 ```
 
-**Ensure shims are in PATH:**
+**Ensure mise bin is in PATH:**
 
 ```bash
 echo $PATH | tr ':' '\n' | grep mise
 ```
 
-Expected: `/opt/mise/shims` and `/opt/mise/bin` should be in PATH.
+Expected: `/opt/mise/bin` should be in PATH. Note: CaeliCode uses direct symlinks into `/opt/mise/bin/` instead of mise shims (shims hang in WSL due to network timeouts).
 
 **Reinstall tools:**
 
 ```bash
 mise install
-mise reshim
 ```
 
 ## Dropped Into Root Shell

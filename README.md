@@ -186,6 +186,8 @@ The wrapper probes standard install locations (user install, system install, Sco
 
 **Requirements:** VS Code installed on Windows. Install the [WSL extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl) if it isn't bundled with your VS Code version.
 
+**Troubleshooting:** If `code .` says "not found", clear the cached path with `rm -f ~/.cache/caelicode-vscode-path` and retry. See [Troubleshooting](docs/troubleshooting.md) for more details.
+
 ### In-place updates
 
 ```bash
