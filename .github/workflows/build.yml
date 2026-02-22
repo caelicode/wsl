@@ -1,6 +1,7 @@
 # CaeliCode WSL — Build, Test & Release
 # Single workflow: builds all profiles → tests → semantic-release → publish assets.
-# Eliminates the double-build that occurred when release.yml triggered separately.
+# The build job validates images with a SHA version. On release, publish-assets
+# rebuilds from GHA cache with the correct version tag for the final tar.gz.
 
 name: Build & Release
 
@@ -93,23 +94,6 @@ jobs:
             exit 1
           fi
 
-      - name: Export tar artifact
-        if: github.ref == 'refs/heads/main'
-        run: |
-          mkdir -p dist
-          CONTAINER=$(docker run --privileged -dt caelicode-wsl:${{ matrix.profile }} bash)
-          docker export "$CONTAINER" | gzip > dist/caelicode-wsl-${{ matrix.profile }}.tar.gz
-          docker rm -f "$CONTAINER"
-          sha256sum dist/caelicode-wsl-${{ matrix.profile }}.tar.gz > dist/caelicode-wsl-${{ matrix.profile }}.sha256
-
-      - name: Upload build artifact
-        if: github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: caelicode-wsl-${{ matrix.profile }}
-          path: dist/
-          retention-days: 7
-
   lint:
     name: Lint scripts
     runs-on: ubuntu-24.04
@@ -191,19 +175,74 @@ jobs:
           fi
 
   publish-assets:
-    name: Publish Release Assets
-    needs: [build, release]
+    name: Publish ${{ matrix.profile }}
+    needs: release
     if: needs.release.outputs.new_release_published == 'true'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: true
+      matrix:
+        profile: [base, sre, dev, data]
+        include:
+          - profile: base
+            target: base-image
+          - profile: sre
+            target: sre-image
+          - profile: dev
+            target: dev-image
+          - profile: data
+            target: data-image
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Rebuild ${{ matrix.profile }} with release version (cache hit)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          build-args: VERSION=v${{ needs.release.outputs.new_release_version }}
+          tags: caelicode-wsl:${{ matrix.profile }}
+          load: true
+          cache-from: type=gha,scope=${{ matrix.profile }}
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export tar
+        run: |
+          mkdir -p dist
+          CONTAINER=$(docker run --privileged -dt caelicode-wsl:${{ matrix.profile }} bash)
+          docker export "$CONTAINER" | gzip > dist/caelicode-wsl-${{ matrix.profile }}.tar.gz
+          docker rm -f "$CONTAINER"
+
+      - name: Generate checksum
+        run: |
+          cd dist
+          sha256sum caelicode-wsl-${{ matrix.profile }}.tar.gz > caelicode-wsl-${{ matrix.profile }}.sha256
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.profile }}
+          path: dist/
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [release, publish-assets]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download all build artifacts
+      - name: Download all release artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: caelicode-wsl-*
+          pattern: release-*
           merge-multiple: true
 
       - name: Generate SBOM
