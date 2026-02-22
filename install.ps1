@@ -376,54 +376,47 @@ $wtPaths = @($wtSettingsPath, $wtPreviewPath, $wtUnpackagedPath) | Where-Object 
 if ($wtPaths.Count -gt 0) {
     Write-Step "Configuring Windows Terminal font..."
 
+    $fontConfigured = $false
     foreach ($wtPath in $wtPaths) {
         try {
-            $wtJson = Get-Content $wtPath -Raw | ConvertFrom-Json
+            # Windows Terminal settings.json often contains // comments,
+            # which ConvertFrom-Json on PowerShell 5.1 cannot parse.
+            # Strip single-line comments before parsing.
+            $rawContent = Get-Content $wtPath -Raw
+            $stripped = $rawContent -replace '(?m)^\s*//.*$', '' -replace '(?<=,)\s*//.*$', ''
+            $wtJson = $stripped | ConvertFrom-Json
 
-            # Ensure profiles.list exists
+            # Ensure profiles object exists
             if (-not $wtJson.profiles) { continue }
-            if (-not $wtJson.profiles.list) { continue }
 
-            $modified = $false
-
-            # Find the WSL distro profile and set font
-            foreach ($profile in $wtJson.profiles.list) {
-                if ($profile.name -eq $DistroName -or $profile.source -eq "Windows.Terminal.Wsl" -and $profile.name -eq $DistroName) {
-                    # Create or update font face setting
-                    if (-not $profile.font) {
-                        $profile | Add-Member -NotePropertyName "font" -NotePropertyValue @{ face = "MesloLGS NF" } -Force
-                    } else {
-                        $profile.font | Add-Member -NotePropertyName "face" -NotePropertyValue "MesloLGS NF" -Force
-                    }
-                    $modified = $true
-                }
+            # Set font in profile defaults so it applies to ALL profiles
+            # (including the WSL distro which may not exist in WT yet).
+            # This is more reliable than searching for a specific profile
+            # because WT auto-discovers WSL distros on launch.
+            if (-not $wtJson.profiles.defaults) {
+                $wtJson.profiles | Add-Member -NotePropertyName "defaults" -NotePropertyValue @{} -Force
+            }
+            $defaults = $wtJson.profiles.defaults
+            if (-not $defaults.font) {
+                $defaults | Add-Member -NotePropertyName "font" -NotePropertyValue @{ face = "MesloLGS NF" } -Force
+            } else {
+                $defaults.font | Add-Member -NotePropertyName "face" -NotePropertyValue "MesloLGS NF" -Force
             }
 
-            # If no matching profile found yet (WT may not have detected it),
-            # set it in defaults so it applies to all profiles including new ones
-            if (-not $modified) {
-                if (-not $wtJson.profiles.defaults) {
-                    $wtJson.profiles | Add-Member -NotePropertyName "defaults" -NotePropertyValue @{} -Force
-                }
-                $defaults = $wtJson.profiles.defaults
-                if (-not $defaults.font) {
-                    $defaults | Add-Member -NotePropertyName "font" -NotePropertyValue @{ face = "MesloLGS NF" } -Force
-                } else {
-                    $defaults.font | Add-Member -NotePropertyName "face" -NotePropertyValue "MesloLGS NF" -Force
-                }
-                $modified = $true
-            }
-
-            if ($modified) {
-                $wtJson | ConvertTo-Json -Depth 20 | Set-Content $wtPath -Encoding UTF8
-            }
+            $wtJson | ConvertTo-Json -Depth 20 | Set-Content $wtPath -Encoding UTF8
+            $fontConfigured = $true
         } catch {
             # Non-fatal — user can set manually
+            Write-Host "    Could not auto-configure $wtPath" -ForegroundColor DarkGray
         }
     }
 
-    if ($wtPaths.Count -gt 0) {
+    if ($fontConfigured) {
         Write-Success "Windows Terminal configured with MesloLGS NF font"
+        Write-Host "    Restart Windows Terminal for the change to take effect." -ForegroundColor DarkGray
+    } else {
+        Write-Host "    Auto-config failed — set the font manually:" -ForegroundColor Yellow
+        Write-Host "    Settings (Ctrl+,) > Defaults > Appearance > Font face > 'MesloLGS NF'" -ForegroundColor DarkGray
     }
 } else {
     Write-Host "    Windows Terminal settings not found — set font manually:" -ForegroundColor DarkGray
