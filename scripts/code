@@ -41,25 +41,46 @@ find_code_cli() {
         "/mnt/c/Program Files (x86)/Microsoft VS Code/bin"
     )
 
-    # For each directory, check code.cmd first (most common on Windows),
-    # then the extensionless script.
+    # Prefer the extensionless 'code' (a bash/shell script that VS Code
+    # ships for WSL/Git Bash). Fall back to 'code.cmd' only if the bash
+    # script is missing — .cmd files must be run via cmd.exe.
     for dir in "${dirs[@]}"; do
-        for name in code.cmd code; do
-            if [ -f "${dir}/${name}" ]; then
-                echo "${dir}/${name}"
-                return 0
-            fi
-        done
+        if [ -f "${dir}/code" ]; then
+            echo "${dir}/code"
+            return 0
+        fi
+    done
+
+    # Fallback: check for code.cmd (will need cmd.exe to execute)
+    for dir in "${dirs[@]}"; do
+        if [ -f "${dir}/code.cmd" ]; then
+            echo "${dir}/code.cmd"
+            return 0
+        fi
     done
 
     return 1
+}
+
+# Launch VS Code, handling both bash scripts and .cmd files
+run_code() {
+    local path="$1"
+    shift
+    if [[ "$path" == *.cmd ]]; then
+        # .cmd files must be executed via cmd.exe, not bash
+        local win_path
+        win_path="$(sed -e 's|^/mnt/\([a-z]\)/|\U\1:\\|' -e 's|/|\\|g' <<< "$path")"
+        exec /mnt/c/Windows/System32/cmd.exe /C "$win_path" "$@"
+    else
+        exec "$path" "$@"
+    fi
 }
 
 # Try cached path first
 if [ -f "$CACHE_FILE" ]; then
     VSCODE_PATH="$(cat "$CACHE_FILE")"
     if [ -f "$VSCODE_PATH" ]; then
-        exec "$VSCODE_PATH" "$@"
+        run_code "$VSCODE_PATH" "$@"
     fi
     # Cached path is stale — remove and re-probe
     rm -f "$CACHE_FILE"
@@ -78,4 +99,4 @@ VSCODE_PATH="$(find_code_cli)" || {
 mkdir -p "$(dirname "$CACHE_FILE")"
 echo "$VSCODE_PATH" > "$CACHE_FILE"
 
-exec "$VSCODE_PATH" "$@"
+run_code "$VSCODE_PATH" "$@"
