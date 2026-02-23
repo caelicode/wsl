@@ -9,6 +9,12 @@
 #   caelicode-update --dry-run    # Show what would change
 #   caelicode-update --version    # Show current version
 #   caelicode-update --full       # Full re-import guide (major upgrades)
+#
+# NOTE: The entire script is wrapped in main() so bash reads the whole file
+# into memory before executing. This prevents breakage when the updater
+# overwrites itself during the scripts copy step.
+
+main() {
 
 set -euo pipefail
 
@@ -54,6 +60,7 @@ Options:
 What gets updated:
   • /opt/caelicode/scripts/      Runtime scripts (DNS, SSH, proxy, update)
   • /opt/caelicode/profiles/     Tool version manifests (TOML)
+  • /opt/caelicode/themes/       Starship prompt themes
   • /etc/caelicode/              Starship prompt, branding config
   • /etc/skel/                   Shell templates for new users
   • mise tools                   Installed versions are upgraded to match
@@ -159,6 +166,7 @@ if $DRY_RUN; then
     log "[DRY RUN] Would download source archive and update:"
     log "[DRY RUN]   - /opt/caelicode/scripts/"
     log "[DRY RUN]   - /opt/caelicode/profiles/"
+    log "[DRY RUN]   - /opt/caelicode/themes/"
     log "[DRY RUN]   - /etc/caelicode/starship.toml"
     log "[DRY RUN]   - /etc/skel/.bashrc, .bash_aliases, .zshrc"
     log "[DRY RUN]   - mise tool versions"
@@ -279,3 +287,10 @@ log ""
 log "Note: If the update included new apt packages or OS-level"
 log "changes, run 'caelicode-update --full' for a re-import guide."
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+}
+
+# Call main with all arguments — the function wrapper ensures bash reads
+# the entire script into memory before executing, preventing breakage
+# when the script overwrites itself during the update.
+main "$@"
