@@ -203,6 +203,10 @@ if [ -d "${EXTRACT_DIR}scripts" ]; then
         sudo chmod +x "${INSTALL_DIR}/scripts/code"
         sudo ln -sf "${INSTALL_DIR}/scripts/code" /usr/local/bin/code
     fi
+    if [ -f "${INSTALL_DIR}/scripts/caelicode-theme" ]; then
+        sudo chmod +x "${INSTALL_DIR}/scripts/caelicode-theme"
+        sudo ln -sf "${INSTALL_DIR}/scripts/caelicode-theme" /usr/local/bin/caelicode-theme
+    fi
     log "  ✓ Scripts updated"
 fi
 
@@ -213,10 +217,30 @@ if [ -d "${EXTRACT_DIR}profiles" ]; then
     log "  ✓ Profiles updated"
 fi
 
-# 3. Starship config
+# 3. Starship themes
+if [ -d "${EXTRACT_DIR}config/themes" ]; then
+    log "Updating starship themes..."
+    sudo mkdir -p "${INSTALL_DIR}/themes"
+    sudo cp -r "${EXTRACT_DIR}config/themes/"* "${INSTALL_DIR}/themes/"
+    log "  ✓ Starship themes updated"
+fi
+
+# 3b. Starship active config (only update if user hasn't switched themes)
 if [ -f "${EXTRACT_DIR}config/starship.toml" ]; then
     log "Updating starship config..."
-    sudo cp "${EXTRACT_DIR}config/starship.toml" "${ETC_DIR}/starship.toml"
+    # Always update the default theme file in the themes dir
+    sudo cp "${EXTRACT_DIR}config/starship.toml" "${INSTALL_DIR}/themes/default.toml"
+    # Only overwrite the active config if it matches the default theme
+    # (i.e. user hasn't switched to a different theme)
+    if [ -f "${INSTALL_DIR}/themes/default.toml" ]; then
+        ACTIVE_HASH="$(md5sum "${ETC_DIR}/starship.toml" 2>/dev/null | cut -d' ' -f1 || echo "")"
+        # Check if current config matches ANY older version of default
+        # If user customised it, we don't overwrite
+        DEFAULT_HASH="$(md5sum "${INSTALL_DIR}/themes/default.toml" | cut -d' ' -f1)"
+        if [ "$ACTIVE_HASH" = "$DEFAULT_HASH" ] || [ ! -f "${ETC_DIR}/starship.toml" ]; then
+            sudo cp "${EXTRACT_DIR}config/starship.toml" "${ETC_DIR}/starship.toml"
+        fi
+    fi
     log "  ✓ Starship config updated"
 fi
 

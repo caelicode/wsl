@@ -142,6 +142,23 @@ Smart aliases upgrade common tools transparently: `ls` uses eza, `cat` uses bat,
 
 Edit `/etc/caelicode/starship.toml` to customize the prompt, or `/etc/caelicode/config.yaml` for MOTD and branding. Changes take effect on next login — no re-import needed.
 
+### Prompt themes
+
+CaeliCode ships with 5 Starship themes. Switch between them instantly:
+
+```bash
+# List available themes
+caelicode-theme
+
+# Switch to a theme
+caelicode-theme gruvbox-rainbow
+
+# Then reload your shell
+exec $SHELL
+```
+
+Available themes: `default` (CaeliCode classic), `gruvbox-rainbow` (warm powerline), `tokyo-night` (cool blue/purple), `pastel-powerline` (soft gradient), and `jetpack` (minimalist with right-aligned info). All themes include CaeliCode-specific modules for Kubernetes, AWS, Azure, and GCP.
+
 ### Terminal font (Nerd Font icons)
 
 CaeliCode uses Starship prompt with Nerd Font icons for git status, directory indicators, and tool versions. The installer automatically installs the **MesloLGS NF** font and configures Windows Terminal and VS Code to use it.

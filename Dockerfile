@@ -134,6 +134,7 @@ RUN mkdir -p /opt/caelicode/scripts /opt/caelicode/profiles /opt/caelicode/test 
 COPY config/wsl.conf /etc/wsl.conf
 COPY config/caelicode.yaml /etc/caelicode/config.yaml
 COPY config/starship.toml /etc/caelicode/starship.toml
+COPY config/themes/ /opt/caelicode/themes/
 COPY config/.bashrc /etc/skel/.bashrc
 COPY config/.bashrc /root/.bashrc
 COPY config/.bash_aliases /etc/skel/.bash_aliases
@@ -146,9 +147,11 @@ COPY scripts/ /opt/caelicode/scripts/
 RUN find /opt/caelicode/scripts -name "*.sh" -exec chmod +x {} + && \
     chmod +x /opt/caelicode/scripts/caelicode-update && \
     chmod +x /opt/caelicode/scripts/code && \
+    chmod +x /opt/caelicode/scripts/caelicode-theme && \
     ln -sf /opt/caelicode/scripts/caelicode-update /usr/local/bin/caelicode-update && \
     ln -sf /opt/caelicode/scripts/health-check.sh /usr/local/bin/caelicode-health && \
-    ln -sf /opt/caelicode/scripts/code /usr/local/bin/code
+    ln -sf /opt/caelicode/scripts/code /usr/local/bin/code && \
+    ln -sf /opt/caelicode/scripts/caelicode-theme /usr/local/bin/caelicode-theme
 
 # Copy profiles for reference
 COPY profiles/ /opt/caelicode/profiles/

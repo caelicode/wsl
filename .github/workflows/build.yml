@@ -106,7 +106,7 @@ jobs:
 
       - name: ShellCheck scripts
         run: |
-          shellcheck -x scripts/*.sh scripts/caelicode-update scripts/code build.sh test/*.sh
+          shellcheck -x scripts/*.sh scripts/caelicode-update scripts/code scripts/caelicode-theme build.sh test/*.sh
 
       - name: Validate Dockerfile
         uses: hadolint/hadolint-action@v3.1.0

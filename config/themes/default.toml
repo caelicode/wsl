@@ -1,0 +1,97 @@
+# CaeliCode WSL — Starship Prompt Configuration
+# https://starship.rs/config/
+
+# Low timeout prevents slow scans on Windows-mounted directories (/mnt/c)
+scan_timeout = 500
+command_timeout = 1000
+
+format = """
+[╭─](bold cyan) $username$hostname$directory$git_branch$git_status$kubernetes$aws$azure$gcloud$python$nodejs$golang$rust$java$docker_context$cmd_duration
+[╰─](bold cyan) $character"""
+
+[character]
+success_symbol = "[❯](bold cyan)"
+error_symbol = "[❯](bold red)"
+
+[username]
+show_always = false
+format = "[$user]($style)@"
+style_user = "bold green"
+
+[hostname]
+ssh_only = true
+format = "[$hostname]($style):"
+style = "bold blue"
+
+[directory]
+truncation_length = 4
+truncate_to_repo = true
+format = "[$path]($style)[$read_only]($read_only_style) "
+style = "bold yellow"
+
+[git_branch]
+format = "on [$symbol$branch]($style) "
+symbol = " "
+style = "bold magenta"
+
+[git_status]
+format = "[$all_status$ahead_behind]($style)"
+style = "bold magenta"
+
+[kubernetes]
+disabled = false
+format = "on [$symbol$context( \\($namespace\\))]($style) "
+symbol = "⎈ "
+style = "bold cyan"
+
+[aws]
+format = "on [$symbol($profile )(\\($region\\))]($style) "
+symbol = " "
+style = "bold #FF9900"
+
+[azure]
+disabled = false
+format = "on [$symbol($subscription)]($style) "
+symbol = "󰠅 "
+style = "bold #0078D4"
+
+[gcloud]
+disabled = false
+format = "on [$symbol$project(\\($region\\))]($style) "
+symbol = " "
+style = "bold #4285F4"
+
+[python]
+format = "via [$symbol($version )]($style)"
+symbol = " "
+style = "bold #3776AB"
+
+[nodejs]
+format = "via [$symbol($version )]($style)"
+symbol = " "
+style = "bold green"
+
+[golang]
+format = "via [$symbol($version )]($style)"
+symbol = " "
+style = "bold cyan"
+
+[rust]
+format = "via [$symbol($version )]($style)"
+symbol = " "
+style = "bold #DEA584"
+
+[java]
+format = "via [$symbol($version )]($style)"
+symbol = " "
+style = "bold #ED8B00"
+
+[docker_context]
+format = "via [$symbol$context]($style) "
+symbol = " "
+style = "bold #2496ED"
+
+[cmd_duration]
+min_time = 2_000
+format = "took [$duration]($style) "
+style = "bold #FFA500"
