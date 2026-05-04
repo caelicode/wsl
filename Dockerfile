@@ -12,7 +12,7 @@
 ###############################################################################
 # BASE — shared foundation for all profiles
 ###############################################################################
-FROM docker.io/ubuntu:24.04 AS base
+FROM docker.io/ubuntu:26.04 AS base
 
 LABEL maintainer="CaeliCode Solutions <hello@caelicode.com>"
 LABEL org.opencontainers.image.source="https://github.com/caelicode/wsl"
