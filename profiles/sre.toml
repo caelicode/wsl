@@ -34,4 +34,4 @@ awscli = "latest"
 eksctl = "latest"
 
 # Security scanning
-trivy = "0.60.0"
+trivy = "0.71.0"

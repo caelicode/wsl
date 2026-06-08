@@ -25,7 +25,7 @@ Everything in base, plus:
 | terraform | 1.14.5 | Infrastructure as code |
 | k9s | 0.50.18 | Kubernetes TUI dashboard |
 | argocd | 3.3.1 | GitOps continuous delivery |
-| trivy | 0.60.0 | Container security scanner |
+| trivy | 0.71.0 | Container security scanner |
 
 **Shell aliases:** `k` → kubectl, `kgp` → kubectl get pods, `kgs` → kubectl get svc, `tf` → terraform, `tfi` → terraform init, `tfp` → terraform plan, `tfa` → terraform apply
 
