@@ -15,6 +15,12 @@
   ],
   "packageRules": [
     {
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["docker.io/ubuntu"],
+      "allowedVersions": "/^24\\.04$/",
+      "description": "WSL image profiles currently build against Ubuntu 24.04 LTS; Ubuntu 26.04 Renovate PRs failed all profile builds."
+    },
+    {
       "matchManagers": ["regex"],
       "groupName": "tool versions",
       "automerge": false,
