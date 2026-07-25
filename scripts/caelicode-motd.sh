@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # CaeliCode WSL — MOTD, update notice, and runtime kick-off
 # Sourced (not executed) by interactive bash and zsh via the shipped
 # rc files. Living under /opt/caelicode/current/scripts means updates
@@ -53,9 +54,10 @@ if [ -r "$_cc_state" ] && command -v jq >/dev/null 2>&1 && _cc_enabled updates.n
 fi
 
 # ── Once-per-boot runtime glue (proxy detect, SSH bridge) ────────────
-if [ -x /opt/caelicode/current/scripts/caelicode-runtime-init ]; then
-    (/opt/caelicode/current/scripts/caelicode-runtime-init >/dev/null 2>&1 &)
-fi
+for _cc_rti in /opt/caelicode/current/scripts/caelicode-runtime-init /opt/caelicode/scripts/caelicode-runtime-init; do
+    if [ -x "$_cc_rti" ]; then ("$_cc_rti" >/dev/null 2>&1 &); break; fi
+done
+unset _cc_rti 2>/dev/null || true
 
 unset _cc_profile _cc_version _cc_title _cc_state _cc_cfg 2>/dev/null || true
 unset -f _cc_enabled 2>/dev/null || true

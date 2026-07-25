@@ -10,12 +10,14 @@ echo "── User Creation Tests ──"
 
 # Default user exists and is configured correctly
 check "caelicode user exists" getent passwd caelicode
+# shellcheck disable=SC2016  # expansion must happen inside bash -c, not here
 check "caelicode uid is 1000" bash -c '[ "$(id -u caelicode)" = "1000" ]'
 check "stock ubuntu user removed" bash -c '! getent passwd ubuntu'
 check "caelicode home dir" test -d /home/caelicode
 check "caelicode shell is zsh" grep -q "caelicode.*/bin/zsh" /etc/passwd
 check "caelicode in sudo group" bash -c 'id -nG caelicode | grep -qw sudo'
 check "caelicode sudoers file" test -f /etc/sudoers.d/caelicode
+# shellcheck disable=SC2016  # expansion must happen inside bash -c, not here
 check "sudoers file mode 0440" bash -c '[ "$(stat -c %a /etc/sudoers.d/caelicode)" = "440" ]'
 
 # Shell config is in place

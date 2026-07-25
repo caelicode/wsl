@@ -22,8 +22,10 @@ on:
     paths-ignore: ["docs/**", "*.md", "LICENSE"]
   pull_request:
     branches: [main]
-  # Recovery lever: re-run the pipeline for main without a new commit
-  # (e.g. a transient failure between draft creation and publishing).
+  # Recovery lever: dispatching the workflow runs the recover-release
+  # job, which publishes any stranded draft whose assets uploaded
+  # completely (the tag-exists case a plain re-run cannot recover,
+  # because the dry run predicts no new version once HEAD is tagged).
   workflow_dispatch:
 
 permissions:
@@ -62,10 +64,15 @@ jobs:
 
       - name: Dry-run semantic-release
         id: dryrun
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # No '|| true' here: semantic-release exits 0 when there is
+        # legitimately nothing to release, so a non-zero exit is always
+        # a real error (auth, git, npm) — masking it would silently
+        # drop releases while the run stays green.
         run: |
-          npx semantic-release --dry-run 2>&1 | tee dryrun.log || true
+          npx semantic-release --dry-run 2>&1 | tee dryrun.log
           NEXT="$(sed -n 's/.*The next release version is \([0-9][0-9a-zA-Z.-]*\).*/\1/p' dryrun.log | tail -1)"
           echo "next_version=${NEXT}" >> "$GITHUB_OUTPUT"
           if [ -n "$NEXT" ]; then
@@ -226,6 +233,9 @@ jobs:
         run: sudo apt-get install -y shellcheck
 
       - name: ShellCheck scripts
+        # caelicode-motd.sh is a sourced fragment (no shebang) — it
+        # carries an inline 'shellcheck shell=bash' directive so the
+        # glob below lints it correctly.
         run: |
           shellcheck -x \
             scripts/*.sh \
@@ -234,7 +244,6 @@ jobs:
             scripts/code \
             .github/scripts/*.sh \
             build.sh test/*.sh
-          shellcheck --shell=bash scripts/caelicode-motd.sh
 
       - name: Validate Dockerfile
         uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
@@ -317,3 +326,39 @@ jobs:
           gh api -X PATCH "repos/${{ github.repository }}/releases/${ID}" \
             -F draft=false >/dev/null
           echo "Release ${VER} published with all assets attached."
+
+  # Publishes stranded drafts: a run that died between semantic-release
+  # (tag + draft + assets) and the flip above leaves an invisible draft
+  # that re-running the pipeline cannot fix (no new version to release).
+  # Trigger manually via: gh workflow run build.yml
+  recover-release:
+    name: Publish stranded draft releases
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Flip complete drafts to published
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          # 12 = 4 image tars + 4 sha256 + checksums + sbom + manifest + payload
+          EXPECTED_ASSETS=12
+          gh api "repos/${{ github.repository }}/releases?per_page=15" \
+            --jq '.[] | select(.draft == true) | [.id, .tag_name, (.assets | length)] | @tsv' \
+          | while IFS=$'\t' read -r id tag assets; do
+              if [ "$assets" -ge "$EXPECTED_ASSETS" ]; then
+                echo "Publishing stranded draft ${tag} (${assets} assets)"
+                gh api -X PATCH "repos/${{ github.repository }}/releases/${id}" \
+                  -F draft=false >/dev/null
+              else
+                echo "::warning::Draft ${tag} has ${assets}/${EXPECTED_ASSETS} assets — incomplete upload. Delete the draft and its tag, then push a release commit."
+              fi
+            done

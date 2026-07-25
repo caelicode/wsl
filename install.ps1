@@ -107,6 +107,18 @@ function Write-Banner {
     Write-Host ""
 }
 
+function Invoke-Native {
+    # Runs a native command with $ErrorActionPreference relaxed.
+    # On Windows PowerShell 5.1, 2>&1 on a native command wraps stderr
+    # lines in NativeCommandError records that ARE subject to
+    # $ErrorActionPreference='Stop' — the first stderr line would kill
+    # the script before our own $LASTEXITCODE guards can run.
+    param([scriptblock]$Block)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Block } finally { $ErrorActionPreference = $prev }
+}
+
 # ── 1. Banner ───────────────────────────────────────────────────────
 Write-Banner
 
@@ -125,7 +137,12 @@ if (-not $isAdmin) {
 # ── 2b. Check CPU architecture ──────────────────────────────────────
 # Release images are amd64-only; importing one on ARM64 Windows would
 # "succeed" and then fail with an exec format error at first launch.
-if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
+# Check the OS architecture, not the process: an x64-emulated
+# PowerShell on ARM64 reports PROCESSOR_ARCHITECTURE=AMD64.
+$osArch = $env:PROCESSOR_ARCHITEW6432
+if (-not $osArch) { $osArch = $env:PROCESSOR_ARCHITECTURE }
+try { $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() } catch {}
+if ($osArch -match '^(ARM64|Arm64)$') {
     Write-Fail "CaeliCode WSL images are x86_64 (amd64) only."
     Write-Host ""
     Write-Host "    This machine is ARM64; the imported distro would not boot." -ForegroundColor Yellow
@@ -151,7 +168,7 @@ if (-not $SkipWslCheck) {
 
     # Check WSL version (need WSL2)
     try {
-        $wslStatus = wsl.exe --status 2>&1 | Out-String
+        $wslStatus = Invoke-Native { wsl.exe --status 2>&1 | Out-String }
         if ($wslStatus -match 'Default Version:\s*1') {
             Write-Fail "WSL default version is 1. CaeliCode requires WSL2."
             Write-Host ""
@@ -223,8 +240,13 @@ Write-Step "Distro name: $DistroName"
 # ── 6. Check for existing distro ────────────────────────────────────
 # Exact per-line match (not substring): 'caelicode-base' must not match
 # a distro named 'caelicode-base-old'. Requires WSL_UTF8=1 (set above).
+# NOTE: the existing distro is NOT removed here — removal is deferred
+# to just before the import, after the new release has been fetched,
+# downloaded, and checksum-verified. A failure anywhere in between
+# leaves the current install untouched.
 $UpgradeBackupPath = $null
-$existingList = (wsl.exe --list --quiet 2>&1 | Out-String) -split "`r?`n" |
+$RemoveExisting = $false
+$existingList = (Invoke-Native { wsl.exe --list --quiet 2>&1 | Out-String }) -split "`r?`n" |
     ForEach-Object { $_.Trim() } | Where-Object { $_ }
 if ($existingList -contains $DistroName) {
     if ($Upgrade) {
@@ -233,8 +255,8 @@ if ($existingList -contains $DistroName) {
         if (-not (Test-Path $backupDir)) { New-Item -ItemType Directory -Path $backupDir -Force | Out-Null }
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         $UpgradeBackupPath = Join-Path $backupDir "$DistroName-$stamp.tar"
-        wsl.exe --terminate $DistroName 2>&1 | Out-Null
-        wsl.exe --export $DistroName $UpgradeBackupPath 2>&1 | Out-Null
+        Invoke-Native { wsl.exe --terminate $DistroName 2>&1 | Out-Null }
+        Invoke-Native { wsl.exe --export $DistroName $UpgradeBackupPath 2>&1 | Out-Null }
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path $UpgradeBackupPath) -or (Get-Item $UpgradeBackupPath).Length -lt 1MB) {
             Write-Fail "Backup export failed — NOT removing the existing distro."
             Write-Host "    Export manually and retry:  wsl --export $DistroName <path>.tar" -ForegroundColor Yellow
@@ -242,13 +264,10 @@ if ($existingList -contains $DistroName) {
         }
         $backupGB = [math]::Round((Get-Item $UpgradeBackupPath).Length / 1GB, 2)
         Write-Success "Backup saved: $UpgradeBackupPath (${backupGB}GB)"
-        Write-Step "Removing existing distro '$DistroName'..."
-        wsl.exe --unregister $DistroName 2>&1 | Out-Null
-        Write-Success "Removed existing distro"
+        $RemoveExisting = $true
     } elseif ($Force) {
-        Write-Step "Removing existing distro '$DistroName'..."
-        wsl.exe --unregister $DistroName 2>&1 | Out-Null
-        Write-Success "Removed existing distro"
+        Write-Step "'$DistroName' will be replaced after the new release is verified."
+        $RemoveExisting = $true
     } else {
         Write-Fail "Distro '$DistroName' already exists."
         Write-Host ""
@@ -326,19 +345,31 @@ $webClient.Headers.Add('User-Agent', 'CaeliCode-WSL-Installer')
 
 try {
     $dlTask = $webClient.DownloadFileTaskAsync($tarAsset.browser_download_url, $tarPath)
+    # Stall guard: async WebClient requests ignore HttpWebRequest
+    # timeouts, so a silently dropped connection would spin forever.
+    $lastLen = -1L
+    $stallSince = Get-Date
     while (-not $dlTask.IsCompleted) {
         Start-Sleep -Milliseconds 500
-        if (Test-Path $tarPath) {
-            $mb = [math]::Round((Get-Item $tarPath).Length / 1MB, 1)
+        $len = if (Test-Path $tarPath) { (Get-Item $tarPath).Length } else { 0 }
+        if ($len -ne $lastLen) {
+            $lastLen = $len
+            $stallSince = Get-Date
+            $mb = [math]::Round($len / 1MB, 1)
             Write-Host ("`r    Downloading... {0}MB / {1}MB   " -f $mb, $tarSizeMB) -NoNewline
+        } elseif (((Get-Date) - $stallSince).TotalSeconds -gt 120) {
+            $webClient.CancelAsync()
+            throw "no data received for 2 minutes — connection stalled"
         }
     }
     if ($dlTask.IsFaulted) { throw $dlTask.Exception.InnerException }
+    if ($dlTask.IsCanceled) { throw "download was cancelled" }
     Write-Host ""  # newline after progress
     Write-Success "Download complete"
 } catch {
     Write-Host ""
     Write-Fail "Download failed: $_"
+    Write-Host "    Your existing distro (if any) has not been touched. Re-run to retry." -ForegroundColor Yellow
     Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
     return
 } finally {
@@ -390,6 +421,14 @@ if ($expectedHash -ne $actualHash) {
 Write-Success "Checksum verified: $($actualHash.Substring(0, 16))..."
 
 # ── 10. Create install directory and import ──────────────────────────
+# The release is now downloaded and checksum-verified — this is the
+# earliest safe moment to remove an existing distro.
+if ($RemoveExisting) {
+    Write-Step "Removing existing distro '$DistroName'..."
+    Invoke-Native { wsl.exe --unregister $DistroName 2>&1 | Out-Null }
+    Write-Success "Removed existing distro"
+}
+
 Write-Step "Importing WSL distro '$DistroName'..."
 
 if (-not (Test-Path $InstallDir)) {
@@ -398,12 +437,17 @@ if (-not (Test-Path $InstallDir)) {
 
 # --version 2: guarantee a WSL2 distro even when the machine's default
 # is WSL1 (the image's interop features do not work under WSL1).
-$importResult = wsl.exe --import $DistroName $InstallDir $tarPath --version 2 2>&1
+$importResult = Invoke-Native { wsl.exe --import $DistroName $InstallDir $tarPath --version 2 2>&1 }
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "WSL import failed: $importResult"
     Write-Host "    If this mentions WSL2 or virtualization, enable it first:" -ForegroundColor Yellow
     Write-Host "      wsl --install --no-distribution" -ForegroundColor White
     Write-Host "    then reboot and re-run this installer." -ForegroundColor Yellow
+    if ($UpgradeBackupPath) {
+        Write-Host ""
+        Write-Host "    Your pre-upgrade backup is safe. Restore it with:" -ForegroundColor Yellow
+        Write-Host "      wsl --import $DistroName `"$InstallDir`" `"$UpgradeBackupPath`" --version 2" -ForegroundColor White
+    }
     Remove-Item $tempDir -Recurse -Force
     return
 }
@@ -493,12 +537,17 @@ if ($wtPaths.Count -gt 0) {
 
             # Set font in profile defaults so it applies to ALL profiles
             # (including the WSL distro which may not exist in WT yet).
+            # PSCustomObject, NOT hashtables: Add-Member on a Hashtable
+            # attaches an ETS property that ConvertTo-Json silently
+            # drops (it serializes dictionary entries only).
             if (-not $wtJson.profiles.defaults) {
-                $wtJson.profiles | Add-Member -NotePropertyName "defaults" -NotePropertyValue @{} -Force
+                $wtJson.profiles | Add-Member -NotePropertyName "defaults" `
+                    -NotePropertyValue ([pscustomobject]@{}) -Force
             }
             $defaults = $wtJson.profiles.defaults
             if (-not $defaults.font) {
-                $defaults | Add-Member -NotePropertyName "font" -NotePropertyValue @{ face = "MesloLGS NF" } -Force
+                $defaults | Add-Member -NotePropertyName "font" `
+                    -NotePropertyValue ([pscustomobject]@{ face = "MesloLGS NF" }) -Force
             } else {
                 $defaults.font | Add-Member -NotePropertyName "face" -NotePropertyValue "MesloLGS NF" -Force
             }

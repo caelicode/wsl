@@ -67,17 +67,24 @@ if [[ -x /opt/mise/bin/fzf ]]; then
 fi
 
 # ── SSH agent bridge socket ──────────────────────────────────────────
-if [ -z "${SSH_AUTH_SOCK:-}" ]; then
+# Liveness-probe the socket (not just -S): in the /tmp fallback a dead
+# socket file survives WSL reboots, and exporting it breaks ssh in
+# every shell until it is cleaned up.
+if [ -z "${SSH_AUTH_SOCK:-}" ] && command -v socat >/dev/null 2>&1; then
     for _cc_sock in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/caelicode-ssh-agent.sock" /tmp/caelicode-ssh-agent.sock; do
-        if [ -S "$_cc_sock" ]; then export SSH_AUTH_SOCK="$_cc_sock"; break; fi
+        if [ -S "$_cc_sock" ] && socat -u OPEN:/dev/null "UNIX-CONNECT:$_cc_sock" 2>/dev/null; then
+            export SSH_AUTH_SOCK="$_cc_sock"; break
+        fi
     done
     unset _cc_sock
 fi
 
 # ── CaeliCode MOTD, update notice & runtime init ─────────────────────
-if [ -r /opt/caelicode/current/scripts/caelicode-motd.sh ]; then
-    . /opt/caelicode/current/scripts/caelicode-motd.sh
-fi
+# (falls back to the legacy flat layout for pre-releases-era images)
+for _cc_motd in /opt/caelicode/current/scripts/caelicode-motd.sh /opt/caelicode/scripts/caelicode-motd.sh; do
+    if [ -r "$_cc_motd" ]; then . "$_cc_motd"; break; fi
+done
+unset _cc_motd
 
 # ── Aliases ──────────────────────────────────────────────────────────
 if [ -f ~/.bash_aliases ]; then

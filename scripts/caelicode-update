@@ -108,8 +108,11 @@ Options:
   --version <tag>    Update (or pin back) to a specific release tag
   --rollback         Switch back to the previously installed release
   --full             Show the guide for a full distro re-import
-  --force            Apply in-place even when the release is marked
-                     as requiring a re-import
+  --force            Repair mode: re-apply even when already up to
+                     date (re-stages, re-runs mise, regenerates the
+                     /opt/mise/bin symlinks), and apply in-place even
+                     when the release is marked as requiring a
+                     re-import
   --quiet, -q        Suppress informational output (used by the
                      scheduled update check)
   -h, --help         Show this help message
@@ -372,6 +375,12 @@ elif [ -z "$TARGET_VERSION" ] && is_semver "$CURRENT_VERSION" && ! is_newer "$TA
     UP_TO_DATE=true
 fi
 
+# --force in apply mode doubles as a repair: re-apply the current
+# release (re-stage, re-link, re-run mise, regenerate symlinks).
+if [ "$MODE" = "update" ] && $FORCE; then
+    UP_TO_DATE=false
+fi
+
 if [ "$MODE" = "check" ]; then
     if $UP_TO_DATE; then
         write_state "$LATEST_VERSION" false "$REQUIRES_REIMPORT" "$NOTES_URL"
@@ -494,17 +503,41 @@ for required in scripts profiles themes; do
     fi
 done
 
+# Capture where the CURRENTLY ACTIVE themes live BEFORE staging: the
+# legacy-layout bootstrap below repoints `current` at the new release,
+# and the starship step needs the OLD theme hashes to tell stock/theme
+# users apart from customized ones.
+OLD_THEMES_DIR=""
+if [ -L "$CURRENT_LINK" ] && [ -d "${CURRENT_LINK}/themes" ]; then
+    OLD_THEMES_DIR="$(readlink -f "$CURRENT_LINK")/themes"
+elif [ -d "${BASE_DIR}/themes" ]; then
+    OLD_THEMES_DIR="${BASE_DIR}/themes"   # legacy flat layout
+fi
+
 # ── Stage Release ────────────────────────────────────────────────────
 log "Staging release ${TARGET}..."
 STAGING="${RELEASES_DIR}/.staging-${TARGET}"
 run_priv rm -rf "$STAGING" "${RELEASES_DIR}/${TARGET}"
 run_priv mkdir -p "$RELEASES_DIR" "$STATE_DIR"
-run_priv cp -a "$PAYLOAD_ROOT" "$STAGING"
+# --no-preserve=ownership: the payload was extracted by the invoking
+# user; without this, root-executed code (including the daily
+# update-check unit's ExecStart) would be owned by uid 1000.
+run_priv cp -a --no-preserve=ownership "$PAYLOAD_ROOT" "$STAGING"
 run_priv find "$STAGING/scripts" -type f -name "*.sh" -exec chmod +x {} +
 for tool in caelicode-update caelicode-theme caelicode-config caelicode-runtime-init code; do
     [ -f "${STAGING}/scripts/${tool}" ] && run_priv chmod +x "${STAGING}/scripts/${tool}"
 done
 run_priv mv "$STAGING" "${RELEASES_DIR}/${TARGET}"
+
+# Legacy flat-layout images have no `current` symlink yet. Bootstrap it
+# to the freshly staged release NOW, before the /usr/local/bin links
+# below start routing through it — otherwise every caelicode command
+# (including this one) dangles for the whole apply phase, and a
+# mid-apply failure would leave the system with no working updater.
+if [ ! -L "$CURRENT_LINK" ]; then
+    log "Legacy layout detected — bootstrapping ${CURRENT_LINK}"
+    run_priv ln -sfn "releases/${TARGET}" "$CURRENT_LINK"
+fi
 
 # ── Apply (per-component; the flip below is the atomic activation) ──
 
@@ -526,18 +559,11 @@ if [ -d "${PAYLOAD_ROOT}/skel" ]; then
     done
 fi
 
-# 3. Starship config. Hash the OLD default/themes BEFORE anything is
-#    overwritten, so we can tell apart:
+# 3. Starship config. OLD_THEMES_DIR was captured before staging, so
+#    the OLD theme hashes tell us apart:
 #      - stock users (active == old default)        → give them the new default
 #      - theme users (active == an old theme file)  → give them the new same theme
 #      - customized users                            → never touch
-OLD_THEMES_DIR=""
-if [ -L "$CURRENT_LINK" ] && [ -d "${CURRENT_LINK}/themes" ]; then
-    OLD_THEMES_DIR="$(readlink -f "$CURRENT_LINK")/themes"
-elif [ -d "${BASE_DIR}/themes" ]; then
-    OLD_THEMES_DIR="${BASE_DIR}/themes"   # legacy flat layout
-fi
-
 ACTIVE_CONF="${ETC_DIR}/starship.toml"
 NEW_THEMES_DIR="${RELEASES_DIR}/${TARGET}/themes"
 if [ -d "$NEW_THEMES_DIR" ]; then
@@ -566,7 +592,7 @@ fi
 # 4. systemd units (update-check timer)
 if [ -d "${PAYLOAD_ROOT}/systemd" ]; then
     log "Updating systemd units..."
-    run_priv cp -a "${PAYLOAD_ROOT}/systemd/." /etc/systemd/system/
+    run_priv cp -a --no-preserve=ownership "${PAYLOAD_ROOT}/systemd/." /etc/systemd/system/
     run_priv mkdir -p /etc/systemd/system/timers.target.wants
     run_priv ln -sf /etc/systemd/system/caelicode-update-check.timer \
         /etc/systemd/system/timers.target.wants/caelicode-update-check.timer
@@ -584,6 +610,7 @@ fi
 
 # 5. Tools: sync the profile pins, install, and regenerate the
 #    /opt/mise/bin symlinks that the runtime PATH actually uses.
+MISE_OK=true
 PROFILE_TOML="${RELEASES_DIR}/${TARGET}/profiles/${CURRENT_PROFILE}.toml"
 if [ -f "$PROFILE_TOML" ]; then
     log "Updating tool versions via mise (this can take a few minutes)..."
@@ -593,17 +620,31 @@ if [ -f "$PROFILE_TOML" ]; then
         regen_tool_symlinks
         log "  ✓ Tool versions updated"
     else
-        warn "mise install failed — scripts/configs are updated, but tool"
-        warn "versions were not. Re-run 'caelicode-update' to retry, or"
-        warn "'caelicode-update --rollback' to return to ${CURRENT_VERSION}."
+        MISE_OK=false
     fi
 else
     warn "Profile TOML not found: ${PROFILE_TOML} — skipping tool update"
 fi
 
-# ── Activate (atomic) ────────────────────────────────────────────────
+# ── Activate ─────────────────────────────────────────────────────────
+# The scripts/configs are good either way, so `current` flips in both
+# cases — but the VERSION marker only advances when the tool sync
+# succeeded. Leaving it behind is what makes "re-run to retry" true:
+# a re-run sees an un-finished version and goes again, instead of
+# exiting "already up to date" over a half-synced toolchain.
 run_priv ln -sfn "releases/${TARGET}" "$CURRENT_LINK"
 printf '%s\n' "$CURRENT_VERSION" | run_priv tee "$PREVIOUS_FILE" >/dev/null
+
+if ! $MISE_OK; then
+    echo ""
+    err "Tool sync (mise install) failed — scripts and configs are updated,"
+    err "but tool versions are not, and the version marker was left at"
+    err "${CURRENT_VERSION} so the update stays pending."
+    err "  Retry:    caelicode-update"
+    err "  Go back:  caelicode-update --rollback"
+    exit 1
+fi
+
 printf '%s\n' "$TARGET" | run_priv tee "$VERSION_FILE" >/dev/null
 write_state "$LATEST_VERSION" false "$REQUIRES_REIMPORT" "$NOTES_URL"
 

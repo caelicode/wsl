@@ -30,9 +30,18 @@ log() { echo "[caelicode-proxy] $*"; }
 #    no-proxy case writes a garbage proxy system-wide;
 #  - strip only the FIRST "label :" prefix — a greedy .*: eats through
 #    the colon inside host:port and leaves only the port behind.
+# Prints a single "PROXY|BYPASS" line ('|' cannot survive the strict
+# charset validation, so it is a safe separator). A newline-separated
+# protocol broke here before: $(…) strips trailing newlines, so an
+# empty bypass collapsed the output to one line and `tail -1` returned
+# the PROXY itself as the bypass list — NO_PROXY ended up set to the
+# proxy endpoint instead of localhost.
+# Return codes: 0 = parsed, 1 = direct access (no proxy), 2 = cannot
+# parse (empty interop output or localized Windows labels).
 detect_windows_proxy() {
     local proxy_output
     proxy_output="$(/mnt/c/windows/system32/netsh.exe winhttp show proxy 2>/dev/null | tr -d '\r' || true)"
+    [ -n "$proxy_output" ] || return 2
 
     local proxy_server
     proxy_server="$(printf '%s\n' "$proxy_output" \
@@ -45,25 +54,36 @@ detect_windows_proxy() {
             | grep -E '^[[:space:]]*Bypass List' | head -1 \
             | sed -E 's/^[^:]*:[[:space:]]*//' | tr -d ' ')"
         [ "$bypass_list" = "(none)" ] && bypass_list=""
-        printf '%s\n%s\n' "$proxy_server" "$bypass_list"
+        printf '%s|%s\n' "$proxy_server" "$bypass_list"
         return 0
     fi
-    return 1
+
+    # English "Direct access (no proxy server)." — genuinely no proxy.
+    if printf '%s\n' "$proxy_output" | grep -qi 'Direct access'; then
+        return 1
+    fi
+    # Non-empty output with neither label: localized Windows, or a
+    # netsh format change. Callers must NOT clear a possibly-valid
+    # existing configuration on this signal.
+    return 2
 }
 
 # Reduce a WinHTTP proxy value to a single host:port.
-# Handles both "host:port" and "http=host:port;https=host2:port2" forms.
+# Handles "host:port", "http://host:port" (netsh accepts scheme-prefixed
+# values), and "http=host:port;https=host2:port2" forms.
 select_proxy_endpoint() {
     local raw="$1"
     if [[ "$raw" == *"="* ]]; then
         local part
         for scheme in https http; do
             part="$(printf '%s\n' "$raw" | tr ';' '\n' | grep -E "^${scheme}=" | head -1 | cut -d= -f2-)"
-            if [ -n "$part" ]; then printf '%s' "$part"; return 0; fi
+            if [ -n "$part" ]; then raw="$part"; break; fi
         done
-        return 1
+        [ -n "$raw" ] || return 1
     fi
-    printf '%s' "$raw"
+    raw="${raw#http://}"
+    raw="${raw#https://}"
+    printf '%s' "${raw%/}"
 }
 
 # The value lands in a root-owned file sourced by every login shell:
@@ -150,20 +170,30 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-PROXY_OUTPUT="$(detect_windows_proxy || true)"
+PROXY_OUTPUT="$(detect_windows_proxy)"
+DETECT_RC=$?
 
-if [ -n "$PROXY_OUTPUT" ]; then
-    RAW_PROXY="$(printf '%s\n' "$PROXY_OUTPUT" | head -1)"
-    BYPASS="$(printf '%s\n' "$PROXY_OUTPUT" | tail -1)"
-    PROXY="$(select_proxy_endpoint "$RAW_PROXY" || true)"
-    if [ -n "$PROXY" ] && valid_endpoint "$PROXY"; then
-        write_proxy_env "$PROXY" "$BYPASS"
-    else
-        log "Detected proxy value looks invalid ('${RAW_PROXY}') — leaving environment unchanged"
-    fi
-else
-    clear_proxy_env
-fi
+case "$DETECT_RC" in
+    0)
+        RAW_PROXY="${PROXY_OUTPUT%%|*}"
+        BYPASS="${PROXY_OUTPUT#*|}"
+        PROXY="$(select_proxy_endpoint "$RAW_PROXY" || true)"
+        if [ -n "$PROXY" ] && valid_endpoint "$PROXY"; then
+            write_proxy_env "$PROXY" "$BYPASS"
+        else
+            log "Detected proxy value looks invalid ('${RAW_PROXY}') — leaving environment unchanged"
+        fi
+        ;;
+    1)
+        # Windows explicitly reports direct access.
+        clear_proxy_env
+        ;;
+    *)
+        # Interop unavailable or unparseable (localized Windows):
+        # never clear a possibly-correct existing configuration.
+        log "Could not read Windows proxy settings — leaving environment unchanged"
+        ;;
+esac
 
 # Merge CA certs if configured
 CFG="${SCRIPT_DIR}/caelicode-config"

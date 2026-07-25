@@ -25,10 +25,28 @@ for ($i = 0; $i -lt $args.Count; $i++) {
 $ErrorActionPreference = 'Stop'
 $env:WSL_UTF8 = '1'
 
-$distros = (wsl.exe --list --quiet 2>&1 | Out-String) -split "`r?`n" |
-    ForEach-Object { $_.Trim() } | Where-Object { $_ -like 'caelicode-*' }
+function Invoke-Native {
+    # PS 5.1: 2>&1 on native stderr + EAP 'Stop' throws NativeCommandError.
+    param([scriptblock]$Block)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Block } finally { $ErrorActionPreference = $prev }
+}
 
-if (-not $distros) {
+$allDistros = (Invoke-Native { wsl.exe --list --quiet 2>&1 | Out-String }) -split "`r?`n" |
+    ForEach-Object { $_.Trim() } | Where-Object { $_ }
+$distros = $allDistros | Where-Object { $_ -like 'caelicode-*' }
+
+# An explicit -DistroName is validated against ALL distros, not just
+# caelicode-* — install.ps1 supports custom names via its own
+# -DistroName parameter.
+if ($DistroName) {
+    if ($allDistros -notcontains $DistroName) {
+        Write-Host "Distro '$DistroName' not found. Installed distros:" -ForegroundColor Red
+        $allDistros | ForEach-Object { Write-Host "  - $_" }
+        return
+    }
+} elseif (-not $distros) {
     Write-Host "No caelicode-* distros found." -ForegroundColor Yellow
     return
 }
@@ -56,8 +74,8 @@ $backupPath = Join-Path $backupDir "$DistroName-$stamp.tar"
 
 Write-Host "Exporting $DistroName → $backupPath" -ForegroundColor Cyan
 Write-Host "(the distro is terminated first for a consistent snapshot)" -ForegroundColor DarkGray
-wsl.exe --terminate $DistroName 2>&1 | Out-Null
-wsl.exe --export $DistroName $backupPath
+Invoke-Native { wsl.exe --terminate $DistroName 2>&1 | Out-Null }
+Invoke-Native { wsl.exe --export $DistroName $backupPath }
 
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $backupPath) -or (Get-Item $backupPath).Length -lt 1MB) {
     Write-Host "Backup FAILED — do not delete or unregister the distro." -ForegroundColor Red

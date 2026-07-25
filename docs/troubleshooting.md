@@ -220,11 +220,12 @@ echo $PATH | tr ':' '\n' | grep mise
 
 Expected: `/opt/mise/bin` should be in PATH. Note: CaeliCode uses direct symlinks into `/opt/mise/bin/` instead of mise shims (shims hang in WSL due to network timeouts).
 
-**Re-sync tools and symlinks** (this is what the updater does too):
+**Re-sync tools and symlinks** — `--force` re-applies the current
+release even when you're already up to date (re-runs `mise install`
+and regenerates the `/opt/mise/bin` symlinks):
 
 ```bash
-sudo caelicode-update --version   # confirm your version
-caelicode-update                  # re-runs mise install + relinks /opt/mise/bin
+caelicode-update --force
 ```
 
 ## Dropped Into Root Shell
