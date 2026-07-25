@@ -2,9 +2,10 @@
 
 ## Prerequisites
 
-- Windows 10 (version 2004+) or Windows 11
-- WSL2 enabled (`wsl --install` in PowerShell as admin)
-- ~2GB free disk space (varies by profile)
+- Windows 10 (version 2004+) or Windows 11, **x86_64** (ARM64 devices
+  are not yet supported — the installer checks and will tell you)
+- WSL2 enabled (`wsl --install --no-distribution` in PowerShell as admin)
+- Free disk space for your profile (see table below)
 
 ## Installation
 
@@ -17,11 +18,11 @@ irm https://raw.githubusercontent.com/caelicode/wsl/main/install.ps1 | iex
 ```
 
 The installer will:
-- Check WSL2 prerequisites
+- Check WSL2 prerequisites and CPU architecture
 - Present an interactive profile menu
-- Download the latest release with progress
-- Verify SHA256 checksum
-- Import the distro into WSL
+- Download the release with live progress
+- Verify the SHA256 checksum
+- Import the distro into WSL (as WSL2, explicitly)
 
 For non-interactive installs (e.g. scripted deployment):
 
@@ -34,17 +35,20 @@ For non-interactive installs (e.g. scripted deployment):
 | `-Profile` | `base`, `sre`, `dev`, or `data` | Interactive menu |
 | `-InstallDir` | Where to store the WSL virtual disk | `%LOCALAPPDATA%\CaeliCode\wsl\<profile>` |
 | `-DistroName` | WSL registration name | `caelicode-<profile>` |
+| `-Version` | Install a specific release tag (e.g. `v0.10.2`) | Latest release |
+| `-Upgrade` | Back up the existing distro, then reinstall | `$false` |
 | `-SkipWslCheck` | Skip WSL prerequisite checks | `$false` |
-| `-Force` | Overwrite existing distro with same name | `$false` |
+| `-Force` | Overwrite existing distro **without** a backup | `$false` |
 
 ### Option 2: Manual download
 
 1. Go to [Releases](https://github.com/caelicode/wsl/releases/latest)
-2. Download the `.tar.gz` file for your profile
+2. Download the `.tar.gz` file for your profile (verify it against the
+   matching `.sha256` asset)
 3. Import into WSL:
 
 ```powershell
-wsl --import caelicode-sre C:\wsl\caelicode caelicode-wsl-sre.tar.gz
+wsl --import caelicode-sre C:\wsl\caelicode caelicode-wsl-sre.tar.gz --version 2
 ```
 
 4. Launch:
@@ -53,7 +57,7 @@ wsl --import caelicode-sre C:\wsl\caelicode caelicode-wsl-sre.tar.gz
 wsl -d caelicode-sre
 ```
 
-### Option 2: Build locally
+### Option 3: Build locally
 
 ```bash
 git clone https://github.com/caelicode/wsl.git
@@ -65,13 +69,17 @@ Then import the tar from `images/caelicode-wsl-sre.tar`.
 
 ## First Launch
 
-On the first launch, CaeliCode automatically:
+The distro ships ready to use — no boot-time setup runs:
 
-1. **Detects your Windows username** via `cmd.exe /c whoami`
-2. **Creates a matching Linux user** with passwordless sudo
-3. **Sets the default WSL user** (subsequent launches drop you in as your user, not root)
-4. **Initializes DNS** from your Windows DNS settings, with Cloudflare/Google fallback
-5. **Displays the CaeliCode MOTD** with your profile and version info
+1. You land in a zsh shell as the pre-created **`caelicode`** user
+   (UID 1000, passwordless sudo). Rename it any time:
+   `sudo usermod -l yourname caelicode`
+2. The CaeliCode banner shows your profile and version.
+3. On the first shell of each boot, CaeliCode starts its runtime
+   services in the background: Windows proxy detection and the SSH
+   agent bridge (both configurable in `/etc/caelicode/config.yaml`).
+4. A daily background check notifies you at login when a new release
+   is available.
 
 ## Verify Installation
 
@@ -81,7 +89,8 @@ Run the built-in health check:
 caelicode-health
 ```
 
-This validates DNS resolution, tool availability (profile-aware), network connectivity, and SSH agent status.
+This validates DNS resolution, tool availability (profile-aware),
+network connectivity, SSH agent status, and update state.
 
 ## Setting as Default Distro
 
@@ -91,14 +100,17 @@ wsl --set-default caelicode-sre
 
 ## Choosing a Profile
 
-See [Profiles](profiles.md) for a detailed breakdown of each profile and which tools it includes.
+See [Profiles](profiles.md) for a detailed breakdown of each profile
+and which tools it includes.
 
-| Profile | Use Case | Approx. Size |
-|---------|----------|-------------|
-| base | Minimal foundation, scripting | ~350MB |
-| sre | Platform engineering, Kubernetes | ~800MB |
-| dev | Software development | ~1.2GB |
-| data | Data engineering, analytics | ~600MB |
+| Profile | Use Case | Download | On disk |
+|---------|----------|----------|---------|
+| base | Minimal foundation, scripting | ~0.4GB | ~1.1GB |
+| sre | Platform engineering, Kubernetes | ~1.2GB | ~3.5GB |
+| dev | Software development | ~1.5GB | ~4.5GB |
+| data | Data engineering, analytics | ~0.6GB | ~1.8GB |
+
+(Sizes are approximate and drift as pinned tools update.)
 
 ## Uninstalling
 
@@ -106,4 +118,6 @@ See [Profiles](profiles.md) for a detailed breakdown of each profile and which t
 wsl --unregister caelicode-sre
 ```
 
-This removes the distro and its virtual disk. Your Windows files are not affected.
+This removes the distro and its virtual disk. Your Windows files are
+not affected. See the [README](../README.md#uninstall) for removing
+the install directory too.

@@ -36,15 +36,32 @@ Then relaunch. If that doesn't work, set DNS manually as above.
 
 ## Proxy Not Detected
 
-**Symptom:** `curl` fails behind corporate proxy even though Windows apps work fine.
+CaeliCode detects the Windows **WinHTTP** proxy on the first shell of
+each boot (when `proxy.detect_enabled` is `true` in
+`/etc/caelicode/config.yaml`) and writes it to
+`/etc/profile.d/caelicode-proxy.sh`.
 
-**Check proxy settings:**
+**Check what was detected:**
 
 ```bash
+cat /etc/profile.d/caelicode-proxy.sh
 echo $http_proxy
 ```
 
-**Manual proxy:**
+**Re-run detection after changing Windows proxy settings:**
+
+```bash
+sudo /opt/caelicode/current/scripts/proxy-detect.sh
+```
+
+Note: many corporate machines configure a *per-user* (WinINET) proxy
+that `netsh winhttp` does not see. Import it once on the Windows side:
+
+```powershell
+netsh winhttp import proxy source=ie
+```
+
+**Manual proxy** (if detection doesn't fit your environment):
 
 ```bash
 export http_proxy=http://proxy.corp.example.com:8080
@@ -52,12 +69,67 @@ export https_proxy=$http_proxy
 export no_proxy=localhost,127.0.0.1,.corp.example.com
 ```
 
-**Corporate CA certificates:** If your proxy does TLS inspection, you need to import the corporate root CA:
+**Corporate CA certificates:** with `proxy.merge_ca_certs: true`,
+Windows root CAs are merged into the Linux trust store automatically.
+To add one manually:
 
 ```bash
-# Copy the cert to the trust store
 sudo cp your-corp-ca.crt /usr/local/share/ca-certificates/
 sudo update-ca-certificates
+```
+
+## SSH Agent Bridge Not Working
+
+**Symptom:** `ssh-add -l` says "Could not open a connection to your
+authentication agent" or lists no keys.
+
+The bridge needs three things:
+
+1. **npiperelay.exe on Windows** — install once:
+   ```powershell
+   go install github.com/jstarks/npiperelay@latest   # or scoop install npiperelay
+   copy "$env:USERPROFILE\go\bin\npiperelay.exe" C:\tools\
+   ```
+2. **The Windows OpenSSH agent running** (PowerShell as admin):
+   ```powershell
+   Set-Service ssh-agent -StartupType Automatic
+   Start-Service ssh-agent
+   ssh-add   # load your keys into the Windows agent
+   ```
+3. **`ssh.agent_forwarding: true`** in `/etc/caelicode/config.yaml`
+   (the default).
+
+The bridge starts on the first shell of each boot. After installing
+npiperelay, open a new shell (or run
+`/opt/caelicode/current/scripts/caelicode-runtime-init`) and check:
+
+```bash
+caelicode-health   # SSH Agent section
+```
+
+## Update Notice Won't Go Away / Updates Seem Stuck
+
+**Symptom:** the login banner keeps offering the same update.
+
+Run the updater verbosely and read the output:
+
+```bash
+caelicode-update
+```
+
+If it reports a checksum failure, retry later (a corrupted download)
+— the updater never applies unverified payloads. If your prompt says
+the update needs a re-import, run `caelicode-update --full` for the
+guide. To see the state the notice is based on:
+
+```bash
+cat /var/lib/caelicode/update-state.json
+```
+
+An update that went wrong can always be reverted:
+
+```bash
+caelicode-update --rollback
 ```
 
 ## Shell Hangs on Launch (Blinking Cursor)
@@ -68,7 +140,7 @@ sudo update-ca-certificates
 
 **CaeliCode prevents this by default** via three mechanisms:
 1. `appendWindowsPath = false` in `/etc/wsl.conf` (prevents Windows PATH pollution)
-2. `cd ~` guard in `.zshrc` (avoids starting in a `/mnt/c/` directory)
+2. a `cd ~` guard in `.zshrc` that applies **only** when the shell starts inside `C:\Windows` (project directories under `/mnt` are left alone, so `wsl --cd` and VS Code terminals keep their working directory)
 3. `scan_timeout = 500` in starship.toml (prevents starship from blocking on slow directories)
 
 **If you still experience hangs**, try:
@@ -97,7 +169,7 @@ CaeliCode ships a `code` wrapper that finds VS Code on Windows without needing `
 **"command not found"** — the wrapper isn't symlinked into PATH. Run:
 
 ```bash
-sudo ln -sf /opt/caelicode/scripts/code /usr/local/bin/code
+sudo ln -sf /opt/caelicode/current/scripts/code /usr/local/bin/code
 ```
 
 If the script itself is missing, update first: `caelicode-update`
@@ -138,7 +210,6 @@ echo 'export PATH="$PATH:/mnt/c/Program Files/Docker/Docker/resources/bin"' >> ~
 
 ```bash
 mise list
-mise doctor
 ```
 
 **Ensure mise bin is in PATH:**
@@ -149,10 +220,11 @@ echo $PATH | tr ':' '\n' | grep mise
 
 Expected: `/opt/mise/bin` should be in PATH. Note: CaeliCode uses direct symlinks into `/opt/mise/bin/` instead of mise shims (shims hang in WSL due to network timeouts).
 
-**Reinstall tools:**
+**Re-sync tools and symlinks** (this is what the updater does too):
 
 ```bash
-mise install
+sudo caelicode-update --version   # confirm your version
+caelicode-update                  # re-runs mise install + relinks /opt/mise/bin
 ```
 
 ## Dropped Into Root Shell
@@ -172,9 +244,10 @@ Then restart WSL: `wsl --shutdown` from PowerShell, and relaunch.
 
 **Symptom:** The tar file is larger than expected.
 
-The base image should be ~350MB, SRE ~800MB, dev ~1.2GB, data ~600MB. If significantly larger, the Docker build cache may have included unnecessary layers.
-
-**Clean build:**
+Approximate sizes: base ~0.4GB download (~1.1GB on disk), sre ~1.2GB
+(~3.5GB), dev ~1.5GB (~4.5GB), data ~0.6GB (~1.8GB). If a local build
+is dramatically larger, the Docker build cache may have accumulated
+stale layers:
 
 ```bash
 docker builder prune
