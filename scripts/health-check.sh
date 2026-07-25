@@ -6,10 +6,13 @@
 
 set -uo pipefail
 
-# Ensure mise shims are in PATH — Docker ENV is lost after wsl --import,
-# and `wsl -- command` runs a non-interactive shell (no profile.d sourcing).
-if [ -d /opt/mise/shims ] && [[ ":$PATH:" != *":/opt/mise/shims:"* ]]; then
-    export PATH="/opt/mise/bin:/opt/mise/shims:$PATH"
+# Ensure the tool symlink dir is in PATH — Docker ENV is lost after
+# wsl --import, and `wsl -- command` runs a non-interactive shell.
+# NOTE: deliberately NOT /opt/mise/shims — shims hang in WSL (they
+# trigger mise version resolution with network calls); the runtime
+# contract is direct symlinks in /opt/mise/bin only.
+if [[ ":$PATH:" != *":/opt/mise/bin:"* ]]; then
+    export PATH="/opt/mise/bin:$PATH"
 fi
 
 QUIET=false
@@ -19,9 +22,9 @@ PASS=0
 FAIL=0
 WARN=0
 
-pass() { ((PASS++)); $QUIET || echo "  ✓ $*"; }
-fail() { ((FAIL++)); echo "  ✗ $*" >&2; }
-warn() { ((WARN++)); $QUIET || echo "  ! $*"; }
+pass() { PASS=$((PASS + 1)); $QUIET || echo "  ✓ $*"; }
+fail() { FAIL=$((FAIL + 1)); echo "  ✗ $*" >&2; }
+warn() { WARN=$((WARN + 1)); $QUIET || echo "  ! $*"; }
 
 section() { $QUIET || echo -e "\n── $* ──"; }
 
@@ -31,6 +34,32 @@ section "System"
 if [ -f /opt/caelicode/VERSION ]; then pass "Version: $(cat /opt/caelicode/VERSION)"; else fail "Version file missing"; fi
 if [ -f /opt/caelicode/PROFILE ]; then pass "Profile: $(cat /opt/caelicode/PROFILE)"; else fail "Profile file missing"; fi
 if [ -f /etc/caelicode/config.yaml ]; then pass "Config: /etc/caelicode/config.yaml"; else warn "Config file missing"; fi
+if [ -L /opt/caelicode/current ] && [ -d /opt/caelicode/current/scripts ]; then
+    pass "Release layout: current → $(readlink /opt/caelicode/current)"
+elif [ -d /opt/caelicode/scripts ]; then
+    warn "Legacy flat layout (run caelicode-update to migrate)"
+else
+    fail "No CaeliCode scripts directory found"
+fi
+
+# ── Updates ──────────────────────────────────────────────────────────
+section "Updates"
+
+STATE_FILE=/var/lib/caelicode/update-state.json
+if [ -r "$STATE_FILE" ] && command -v jq >/dev/null 2>&1; then
+    if [ "$(jq -r '.available // false' "$STATE_FILE" 2>/dev/null)" = "true" ]; then
+        LATEST="$(jq -r '.latest // "?"' "$STATE_FILE" 2>/dev/null)"
+        if [ "$(jq -r '.requires_reimport // false' "$STATE_FILE" 2>/dev/null)" = "true" ]; then
+            warn "Update available: ${LATEST} (requires re-import — caelicode-update --full)"
+        else
+            warn "Update available: ${LATEST} (run: caelicode-update)"
+        fi
+    else
+        pass "Up to date as of $(jq -r '.checked_at // "?"' "$STATE_FILE" 2>/dev/null)"
+    fi
+else
+    warn "No update check has run yet (caelicode-update --check)"
+fi
 
 # ── Tools ────────────────────────────────────────────────────────────
 section "Tools"
@@ -80,11 +109,12 @@ fi
 # ── Networking ───────────────────────────────────────────────────────
 section "Networking"
 
-if [ -s /etc/resolv.conf ]; then
-    NS="$(grep -c "^nameserver" /etc/resolv.conf || echo "0")"
-    pass "DNS configured (${NS} nameservers)"
+NS="$(grep -c '^nameserver' /etc/resolv.conf 2>/dev/null || true)"
+NS="${NS:-0}"
+if [ "$NS" -gt 0 ] 2>/dev/null; then
+    pass "DNS configured (${NS} nameserver(s))"
 else
-    fail "resolv.conf is empty — DNS broken"
+    fail "No nameservers in /etc/resolv.conf — DNS broken"
 fi
 
 if curl -sf --max-time 5 https://github.com >/dev/null 2>&1; then
@@ -98,11 +128,26 @@ fi
 # ── SSH Agent ────────────────────────────────────────────────────────
 section "SSH Agent"
 
+BRIDGE_SOCK="${XDG_RUNTIME_DIR:-/tmp}/caelicode-ssh-agent.sock"
 if [ -S "${SSH_AUTH_SOCK:-}" ]; then
-    KEYS="$(ssh-add -l 2>/dev/null | wc -l || echo "0")"
-    pass "SSH agent connected (${KEYS} keys)"
-elif [ -S "/tmp/caelicode-ssh-agent.sock" ]; then
-    warn "SSH bridge socket exists but SSH_AUTH_SOCK not set"
+    # ssh-add exit codes: 0 = keys listed, 1 = agent reachable but empty,
+    # 2 = cannot contact agent. Counting output lines miscounts the
+    # "The agent has no identities." message as a key.
+    ssh-add -l >/dev/null 2>&1
+    case $? in
+        0)
+            KEYS="$(ssh-add -l 2>/dev/null | grep -c . || true)"
+            pass "SSH agent connected (${KEYS} key(s))"
+            ;;
+        1)
+            pass "SSH agent connected (no keys loaded — add them in Windows: ssh-add)"
+            ;;
+        *)
+            warn "SSH_AUTH_SOCK is set but the agent is not responding"
+            ;;
+    esac
+elif [ -S "$BRIDGE_SOCK" ] || [ -S /tmp/caelicode-ssh-agent.sock ]; then
+    warn "SSH bridge socket exists but SSH_AUTH_SOCK is not set (open a new shell)"
 else
     warn "SSH agent bridge not running (optional — needs npiperelay.exe)"
 fi

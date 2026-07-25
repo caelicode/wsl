@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily CaeliCode WSL update check
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=24h
+# Spread fleet machines across a half-hour window so a large org does
+# not stampede the GitHub API at the same second every day.
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

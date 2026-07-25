@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# CaeliCode WSL — once-per-boot runtime glue
+#
+# Kicked asynchronously from interactive shell init. Windows interop
+# (netsh.exe, npiperelay.exe) is not reliably available to early systemd
+# units in WSL, so the interop-dependent services start from the first
+# interactive shell of each boot instead:
+#   • proxy detection  (proxy.detect_enabled)   → /etc/profile.d env + CA merge
+#   • SSH agent bridge (ssh.agent_forwarding)   → socket for SSH_AUTH_SOCK
+#
+# Safe to run repeatedly: a per-boot flag makes it a no-op after the
+# first successful pass, and each step degrades silently when its
+# prerequisites (sudo, npiperelay) are missing.
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CFG="${SCRIPT_DIR}/caelicode-config"
+FLAG="${XDG_RUNTIME_DIR:-/tmp}/caelicode-runtime-init.done"
+
+[ -e "$FLAG" ] && exit 0
+
+cfg_enabled() {
+    # cfg_enabled <key> <default>
+    if [ -x "$CFG" ]; then "$CFG" is-enabled "$1" "$2"; else [ "$2" = "true" ]; fi
+}
+
+# ── Proxy detection (needs root: writes /etc/profile.d + trust store) ─
+if cfg_enabled proxy.detect_enabled true && [ -x "${SCRIPT_DIR}/proxy-detect.sh" ]; then
+    sudo -n "${SCRIPT_DIR}/proxy-detect.sh" >/dev/null 2>&1 || true
+fi
+
+# ── SSH agent bridge (runs as the user; socket mode 600) ─────────────
+if cfg_enabled ssh.agent_forwarding true && [ -x "${SCRIPT_DIR}/ssh-bridge.sh" ]; then
+    SOCKET="${XDG_RUNTIME_DIR:-/tmp}/caelicode-ssh-agent.sock"
+    if [ ! -S "$SOCKET" ]; then
+        nohup "${SCRIPT_DIR}/ssh-bridge.sh" >/dev/null 2>&1 &
+        disown 2>/dev/null || true
+    fi
+fi
+
+touch "$FLAG" 2>/dev/null || true

@@ -1,0 +1,14 @@
+[Unit]
+Description=CaeliCode WSL update check
+Documentation=https://github.com/caelicode/wsl/blob/main/docs/updating.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Skip (not fail) when the user disabled background checks in config.yaml.
+ExecCondition=/opt/caelicode/current/scripts/caelicode-config is-enabled updates.check_enabled true
+ExecStart=/opt/caelicode/current/scripts/caelicode-update --check --quiet
+# --check exits 10/20 to signal "update available" — that is a success
+# for the timer, not a unit failure.
+SuccessExitStatus=10 20

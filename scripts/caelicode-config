@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# CaeliCode WSL — config reader for /etc/caelicode/config.yaml
+#
+# The config file is a flat two-level YAML (section: / two-space keys).
+# This reader is what makes config.yaml real: shell init, the updater,
+# and the runtime-init hook all consult it through this script.
+#
+# Usage:
+#   caelicode-config get <section.key> [default]     # print value (or default)
+#   caelicode-config is-enabled <section.key> [default]
+#                                                    # exit 0 iff value is "true"
+set -euo pipefail
+
+CONFIG_FILE="${CAELICODE_CONFIG:-/etc/caelicode/config.yaml}"
+
+usage() {
+    echo "Usage: caelicode-config {get|is-enabled} <section.key> [default]" >&2
+    exit 2
+}
+
+[ $# -ge 2 ] || usage
+CMD="$1"
+KEY="$2"
+DEFAULT="${3:-}"
+
+SECTION="${KEY%%.*}"
+SUBKEY="${KEY#*.}"
+[ "$SECTION" != "$SUBKEY" ] || usage  # a dotted section.key is required
+
+VALUE=""
+if [ -r "$CONFIG_FILE" ]; then
+    VALUE="$(awk -v section="$SECTION" -v key="$SUBKEY" '
+        /^[A-Za-z0-9_]+:/ { in_section = ($0 ~ "^" section ":"); next }
+        in_section && $0 ~ "^[[:space:]]+" key ":" {
+            line = $0
+            sub(/^[[:space:]]+[A-Za-z0-9_]+:[[:space:]]*/, "", line)
+            sub(/[[:space:]]+#.*$/, "", line)   # trailing comment
+            gsub(/^"|"$/, "", line)             # surrounding quotes
+            print line
+            exit
+        }
+    ' "$CONFIG_FILE")"
+fi
+
+[ -n "$VALUE" ] || VALUE="$DEFAULT"
+
+case "$CMD" in
+    get)        printf '%s\n' "$VALUE" ;;
+    is-enabled) [ "$VALUE" = "true" ] ;;
+    *)          usage ;;
+esac

@@ -1,35 +1,32 @@
 # CaeliCode WSL Configuration
-# Edit this file to customize your environment. Changes take effect on next login.
 # Location: /etc/caelicode/config.yaml
+#
+# Read via `caelicode-config get <section.key>`. Every key listed here
+# is honored by the shipped scripts — shell settings apply on next
+# login, service settings on next boot (`wsl --shutdown`, relaunch).
+# This file is never overwritten by caelicode-update.
 
 branding:
   # MOTD banner displayed on login
   motd_enabled: true
   motd_text: "CaeliCode WSL"
 
-  # PS1 prompt features
-  prompt_git_branch: true
-  prompt_k8s_context: true
-
-  # Prompt colors (ANSI escape codes)
-  prompt_colors:
-    user: "32"        # green
-    host: "34"        # blue
-    path: "33"        # yellow
-    git: "35"         # magenta
-    k8s: "36"         # cyan
-
-dns:
-  # Dynamic DNS watcher (detects VPN/network changes)
-  watch_enabled: true
-  watch_interval: 5   # seconds
-
 proxy:
-  # Auto-detect Windows proxy settings
+  # Detect the Windows WinHTTP proxy at boot and export
+  # HTTP_PROXY/HTTPS_PROXY/NO_PROXY for all login shells
   detect_enabled: true
-  # Merge Windows root CA certs into Linux trust store
+  # Merge Windows root CA certs into the Linux trust store
+  # (corporate TLS-inspection environments)
   merge_ca_certs: true
 
 ssh:
-  # Bridge Windows SSH agent to WSL via socat
+  # Bridge the Windows OpenSSH agent to a WSL socket
+  # (requires npiperelay.exe — see docs/troubleshooting.md)
   agent_forwarding: true
+
+updates:
+  # Daily background update check (systemd timer; writes the local
+  # state cache that powers the login notice — no network at login)
+  check_enabled: true
+  # Show the "Update available" notice in the login banner
+  notify_motd: true

@@ -2,17 +2,18 @@
 # CaeliCode WSL — Starship Theme Switcher
 #
 # Switch between bundled Starship prompt themes.
-# Themes are stored in /opt/caelicode/themes/ and the active theme
-# is symlinked to /etc/caelicode/starship.toml.
+# Themes ship in /opt/caelicode/current/themes/ and the active theme
+# is copied to /etc/caelicode/starship.toml.
 #
 # Usage:
 #   caelicode-theme                 # List themes and show active
 #   caelicode-theme <name>          # Switch to a theme
-#   caelicode-theme --preview       # Preview each theme's description
 
 set -euo pipefail
 
-THEMES_DIR="/opt/caelicode/themes"
+THEMES_DIR="/opt/caelicode/current/themes"
+# Legacy flat layout (images before the versioned-releases era)
+[ -d "$THEMES_DIR" ] || THEMES_DIR="/opt/caelicode/themes"
 ACTIVE_CONFIG="/etc/caelicode/starship.toml"
 
 # Theme descriptions
