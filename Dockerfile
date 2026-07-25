@@ -45,6 +45,7 @@ RUN apt-get update -q && apt-get upgrade -y && apt-get install -y --no-install-r
     tree \
     unzip \
     vim \
+    wget \
     zip \
     zsh \
     # Python build dependencies
@@ -122,19 +123,28 @@ ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV NODE_OPTIONS=--use-openssl-ca
-RUN git config --global http.sslcainfo /etc/ssl/certs/ca-certificates.crt
+# --system (not --global): --global as root writes /root/.gitconfig only,
+# which the default caelicode user never reads.
+RUN git config --system http.sslcainfo /etc/ssl/certs/ca-certificates.crt
 
 # ── Starship prompt config ───────────────────────────────────────────
 ENV STARSHIP_CONFIG=/etc/caelicode/starship.toml
 
 # ── CaeliCode directory structure ────────────────────────────────────
-RUN mkdir -p /opt/caelicode/scripts /opt/caelicode/profiles /opt/caelicode/test /etc/caelicode
+# Versioned releases layout: content is staged under releases/<version>
+# and activated via the /opt/caelicode/current symlink. The profile
+# stages rename releases/build to the real version and create the
+# symlink; caelicode-update stages new releases the same way and flips
+# the symlink atomically (with rollback to the previous release).
+RUN mkdir -p /opt/caelicode/releases/build /opt/caelicode/test /etc/caelicode /var/lib/caelicode
 
 # Copy configs
 COPY config/wsl.conf /etc/wsl.conf
 COPY config/caelicode.yaml /etc/caelicode/config.yaml
 COPY config/starship.toml /etc/caelicode/starship.toml
-COPY config/themes/ /opt/caelicode/themes/
+COPY config/themes/ /opt/caelicode/releases/build/themes/
+# The default theme IS the shipped starship.toml — one source of truth.
+COPY config/starship.toml /opt/caelicode/releases/build/themes/default.toml
 COPY config/.bashrc /etc/skel/.bashrc
 COPY config/.bashrc /root/.bashrc
 COPY config/.bash_aliases /etc/skel/.bash_aliases
@@ -142,19 +152,29 @@ COPY config/.bash_aliases /root/.bash_aliases
 COPY config/.zshrc /etc/skel/.zshrc
 COPY config/.zshrc /root/.zshrc
 
-# Copy scripts
-COPY scripts/ /opt/caelicode/scripts/
-RUN find /opt/caelicode/scripts -name "*.sh" -exec chmod +x {} + && \
-    chmod +x /opt/caelicode/scripts/caelicode-update && \
-    chmod +x /opt/caelicode/scripts/code && \
-    chmod +x /opt/caelicode/scripts/caelicode-theme && \
-    ln -sf /opt/caelicode/scripts/caelicode-update /usr/local/bin/caelicode-update && \
-    ln -sf /opt/caelicode/scripts/health-check.sh /usr/local/bin/caelicode-health && \
-    ln -sf /opt/caelicode/scripts/code /usr/local/bin/code && \
-    ln -sf /opt/caelicode/scripts/caelicode-theme /usr/local/bin/caelicode-theme
+# systemd units (update-check timer); enabled by symlink since systemd
+# is not running at build time.
+COPY config/systemd/ /etc/systemd/system/
+RUN mkdir -p /etc/systemd/system/timers.target.wants && \
+    ln -sf /etc/systemd/system/caelicode-update-check.timer \
+        /etc/systemd/system/timers.target.wants/caelicode-update-check.timer
 
-# Copy profiles for reference
-COPY profiles/ /opt/caelicode/profiles/
+# Copy scripts
+COPY scripts/ /opt/caelicode/releases/build/scripts/
+RUN find /opt/caelicode/releases/build/scripts -name "*.sh" -exec chmod +x {} + && \
+    chmod +x /opt/caelicode/releases/build/scripts/caelicode-update \
+             /opt/caelicode/releases/build/scripts/caelicode-theme \
+             /opt/caelicode/releases/build/scripts/caelicode-config \
+             /opt/caelicode/releases/build/scripts/caelicode-runtime-init \
+             /opt/caelicode/releases/build/scripts/code && \
+    ln -sf /opt/caelicode/current/scripts/caelicode-update /usr/local/bin/caelicode-update && \
+    ln -sf /opt/caelicode/current/scripts/health-check.sh /usr/local/bin/caelicode-health && \
+    ln -sf /opt/caelicode/current/scripts/code /usr/local/bin/code && \
+    ln -sf /opt/caelicode/current/scripts/caelicode-theme /usr/local/bin/caelicode-theme && \
+    ln -sf /opt/caelicode/current/scripts/caelicode-config /usr/local/bin/caelicode-config
+
+# Copy profiles (tool-version manifests)
+COPY profiles/ /opt/caelicode/releases/build/profiles/
 
 # Copy test suite
 COPY test/ /opt/caelicode/test/
@@ -168,7 +188,10 @@ RUN chsh -s /bin/zsh root && \
 # Pre-create a default user during build so the distro is immediately
 # usable after `wsl --import` — no boot-time Windows interop needed.
 # Users can rename later via: sudo usermod -l newname caelicode
-RUN useradd -ms /bin/zsh caelicode && \
+# NOTE: ubuntu:24.04 ships a stock 'ubuntu' user at UID 1000; remove it
+# so caelicode takes the conventional first-user UID (asserted at 1000).
+RUN userdel -r ubuntu 2>/dev/null || true && \
+    useradd -m -u 1000 -s /bin/zsh caelicode && \
     usermod -aG sudo caelicode && \
     echo "caelicode ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/caelicode && \
     chmod 0440 /etc/sudoers.d/caelicode && \
@@ -198,7 +221,9 @@ FROM base AS base-image
 
 ARG VERSION=dev
 RUN echo "base" > /opt/caelicode/PROFILE && \
-    echo "${VERSION}" > /opt/caelicode/VERSION
+    echo "${VERSION}" > /opt/caelicode/VERSION && \
+    mv /opt/caelicode/releases/build "/opt/caelicode/releases/${VERSION}" && \
+    ln -sfn "releases/${VERSION}" /opt/caelicode/current
 
 
 ###############################################################################
@@ -238,7 +263,9 @@ RUN curl -sSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
 
 ARG VERSION=dev
 RUN echo "sre" > /opt/caelicode/PROFILE && \
-    echo "${VERSION}" > /opt/caelicode/VERSION
+    echo "${VERSION}" > /opt/caelicode/VERSION && \
+    mv /opt/caelicode/releases/build "/opt/caelicode/releases/${VERSION}" && \
+    ln -sfn "releases/${VERSION}" /opt/caelicode/current
 
 
 ###############################################################################
@@ -270,7 +297,9 @@ RUN for shim in /opt/mise/shims/*; do \
 
 ARG VERSION=dev
 RUN echo "dev" > /opt/caelicode/PROFILE && \
-    echo "${VERSION}" > /opt/caelicode/VERSION
+    echo "${VERSION}" > /opt/caelicode/VERSION && \
+    mv /opt/caelicode/releases/build "/opt/caelicode/releases/${VERSION}" && \
+    ln -sfn "releases/${VERSION}" /opt/caelicode/current
 
 
 ###############################################################################
@@ -309,4 +338,6 @@ RUN /opt/mise/bin/uv tool install dbt-core --with dbt-postgres && \
 
 ARG VERSION=dev
 RUN echo "data" > /opt/caelicode/PROFILE && \
-    echo "${VERSION}" > /opt/caelicode/VERSION
+    echo "${VERSION}" > /opt/caelicode/VERSION && \
+    mv /opt/caelicode/releases/build "/opt/caelicode/releases/${VERSION}" && \
+    ln -sfn "releases/${VERSION}" /opt/caelicode/current
