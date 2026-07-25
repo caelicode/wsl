@@ -24,9 +24,20 @@ ssh:
   # (requires npiperelay.exe — see docs/troubleshooting.md)
   agent_forwarding: true
 
+dns:
+  # Watch DNS health and re-point /etc/resolv.conf at the current
+  # Windows DNS servers when resolution breaks (classic VPN breakage).
+  # Opt-in: it rewrites a system file.
+  watch_enabled: false
+  # Seconds between health probes (minimum 5)
+  watch_interval: 30
+
 updates:
   # Daily background update check (systemd timer; writes the local
   # state cache that powers the login notice — no network at login)
   check_enabled: true
   # Show the "Update available" notice in the login banner
   notify_motd: true
+  # Also raise a Windows toast notification (once per new release).
+  # Opt-in: a distro should not pop OS notifications uninvited.
+  notify_windows_toast: false

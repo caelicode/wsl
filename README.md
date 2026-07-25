@@ -175,11 +175,32 @@ is honored by the shipped scripts (read them with `caelicode-config`):
 branding:  motd_enabled, motd_text
 proxy:     detect_enabled, merge_ca_certs
 ssh:       agent_forwarding
-updates:   check_enabled, notify_motd
+dns:       watch_enabled, watch_interval
+updates:   check_enabled, notify_motd, notify_windows_toast
 ```
 
 Shell-visible changes apply on next login; service settings on next
 boot. The file is never overwritten by updates.
+
+### Team profiles & fleet policy
+
+Layer team-specific tools on top of any profile without forking
+(`caelicode-profile add <name> <https-url>`), pin or centrally manage
+a fleet's updates via `/etc/caelicode/policy.yaml`, and serve releases
+from your own fork. See [Enterprise & Team Features](docs/enterprise.md).
+
+### DNS watcher (opt-in)
+
+Set `dns.watch_enabled: true` and CaeliCode monitors DNS health,
+re-pointing `/etc/resolv.conf` at the current Windows DNS servers when
+resolution breaks (the classic VPN-connect failure) — with a
+Cloudflare/Google fallback when Windows can't be queried.
+
+### Devcontainer parity
+
+The shipped [.devcontainer](.devcontainer/devcontainer.json) builds
+the same Dockerfile (`dev-image` target), so VS Code devcontainers and
+Codespaces match your WSL environment exactly.
 
 ### Prompt themes
 
@@ -273,6 +294,7 @@ Validates DNS, tools (profile-aware), network connectivity, SSH agent status, an
 - [Getting Started](docs/getting-started.md) — Installation and first-launch walkthrough
 - [Profiles](docs/profiles.md) — What each profile includes and when to use it
 - [Updating](docs/updating.md) — Update notifications, in-place updates, rollback
+- [Enterprise & Team](docs/enterprise.md) — Team profile layers, fleet policy, toasts, devcontainers
 - [Troubleshooting](docs/troubleshooting.md) — Common issues and solutions
 
 ## License

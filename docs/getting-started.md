@@ -2,8 +2,9 @@
 
 ## Prerequisites
 
-- Windows 10 (version 2004+) or Windows 11, **x86_64** (ARM64 devices
-  are not yet supported — the installer checks and will tell you)
+- Windows 10 (version 2004+) or Windows 11. x86_64 is fully supported;
+  **ARM64 machines get preview images** (the installer detects your
+  architecture and picks the right assets automatically)
 - WSL2 enabled (`wsl --install --no-distribution` in PowerShell as admin)
 - Free disk space for your profile (see table below)
 

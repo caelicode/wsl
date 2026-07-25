@@ -50,6 +50,11 @@ TEMP_DIR="$(mktemp -d)"
 # shellcheck disable=SC2064
 trap "rm -rf $TEMP_DIR" EXIT
 
+# Companion scripts live beside this one (whether invoked from
+# /opt/caelicode/current/scripts or via the /usr/local/bin symlinks,
+# which point at siblings).
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 QUIET=false
 log()  { $QUIET || echo "[caelicode-update] $*"; }
 err()  { echo "[caelicode-update] ERROR: $*" >&2; }
@@ -187,6 +192,50 @@ Step 5 — When satisfied, clean up (from PowerShell):
 
 EOF
     exit 0
+fi
+
+# ── Fleet policy (optional, admin-provisioned) ───────────────────────
+# /etc/caelicode/policy.yaml lets an organization manage a fleet:
+#   policy:
+#     updates_disabled: true          # central management only
+#     pin_version: v0.11.0            # hold every machine at a release
+#     update_repo: my-org/wsl-fork    # serve releases from a fork
+POLICY_FILE="/etc/caelicode/policy.yaml"
+policy_get() {
+    [ -r "$POLICY_FILE" ] && [ -x "${SELF_DIR}/caelicode-config" ] || return 1
+    CAELICODE_CONFIG="$POLICY_FILE" "${SELF_DIR}/caelicode-config" get "$1" 2>/dev/null
+}
+
+POLICY_REPO="$(policy_get policy.update_repo || true)"
+if [ -n "$POLICY_REPO" ]; then
+    if [[ "$POLICY_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+        REPO="$POLICY_REPO"
+        API_BASE="https://api.github.com/repos/${REPO}"
+        log "Fleet policy: releases served from ${REPO}"
+    else
+        warn "Ignoring malformed policy.update_repo: ${POLICY_REPO}"
+    fi
+fi
+
+if [ "$(policy_get policy.updates_disabled || true)" = "true" ]; then
+    if [ "$MODE" = "check" ]; then
+        log "Updates on this machine are managed centrally (policy.updates_disabled)."
+        exit 0
+    fi
+    err "Updates on this machine are managed by your administrator"
+    err "(/etc/caelicode/policy.yaml: policy.updates_disabled)."
+    exit 1
+fi
+
+POLICY_PIN="$(policy_get policy.pin_version || true)"
+if [ -n "$POLICY_PIN" ]; then
+    if [ -n "$TARGET_VERSION" ] && [ "$TARGET_VERSION" != "$POLICY_PIN" ]; then
+        err "Fleet policy pins this machine to ${POLICY_PIN};"
+        err "--version ${TARGET_VERSION} is not allowed."
+        exit 1
+    fi
+    TARGET_VERSION="$POLICY_PIN"
+    log "Fleet policy pins version: ${POLICY_PIN}"
 fi
 
 # ── Release lookup ───────────────────────────────────────────────────
@@ -388,6 +437,9 @@ if [ "$MODE" = "check" ]; then
         exit 0
     fi
     write_state "$LATEST_VERSION" true "$REQUIRES_REIMPORT" "$NOTES_URL"
+    # Opt-in Windows toast (no-op without interop, e.g. from the timer;
+    # runtime-init retries with interop on the next login).
+    [ -x "${SELF_DIR}/caelicode-notify" ] && "${SELF_DIR}/caelicode-notify" update-available >/dev/null 2>&1 || true
     if [ "$REQUIRES_REIMPORT" = "true" ]; then
         log "Update available: ${CURRENT_VERSION} → ${LATEST_VERSION} (requires full re-import — run: caelicode-update --full)"
         exit 20
@@ -549,6 +601,7 @@ link_cmd caelicode-update  caelicode-update
 link_cmd health-check.sh   caelicode-health
 link_cmd caelicode-theme   caelicode-theme
 link_cmd caelicode-config  caelicode-config
+link_cmd caelicode-profile caelicode-profile
 link_cmd code              code
 
 # 2. Shell templates for new users (existing homes are never touched)
@@ -614,7 +667,16 @@ MISE_OK=true
 PROFILE_TOML="${RELEASES_DIR}/${TARGET}/profiles/${CURRENT_PROFILE}.toml"
 if [ -f "$PROFILE_TOML" ]; then
     log "Updating tool versions via mise (this can take a few minutes)..."
-    run_priv cp "$PROFILE_TOML" "$MISE_CONFIG"
+    # Team profile layers (caelicode-profile) are re-merged over the
+    # NEW release's base profile so updates never drop layered tools.
+    if compgen -G "/etc/caelicode/profiles.d/*.toml" >/dev/null 2>&1 \
+        && [ -x "${RELEASES_DIR}/${TARGET}/scripts/caelicode-profile" ]; then
+        log "Re-merging team profile layers..."
+        "${RELEASES_DIR}/${TARGET}/scripts/caelicode-profile" merge --base "$PROFILE_TOML" \
+            || run_priv cp "$PROFILE_TOML" "$MISE_CONFIG"
+    else
+        run_priv cp "$PROFILE_TOML" "$MISE_CONFIG"
+    fi
     if run_mise install 2>&1 | tail -20; then
         run_mise reshim || true
         regen_tool_symlinks

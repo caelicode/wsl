@@ -26,7 +26,20 @@ echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8" | sudo tee /etc/resolv.conf
 
 **Symptom:** DNS worked before connecting to VPN, now it doesn't.
 
-**Fix:** Restart WSL so it picks up the new DNS settings:
+**Automatic fix (opt-in):** enable the DNS watcher and CaeliCode will
+detect the breakage and re-point `resolv.conf` at the current Windows
+DNS servers within about a minute:
+
+```yaml
+# /etc/caelicode/config.yaml
+dns:
+  watch_enabled: true
+```
+
+(Takes effect at next boot; it rewrites `/etc/resolv.conf`, which is
+why it's opt-in.)
+
+**Manual fix:** Restart WSL so it picks up the new DNS settings:
 
 ```powershell
 wsl --shutdown

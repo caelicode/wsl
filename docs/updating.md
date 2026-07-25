@@ -122,6 +122,14 @@ PowerShell you can do the same with an automatic backup:
 which exports the existing distro to `%USERPROFILE%\caelicode-backups\`
 (and aborts if the backup fails) before reinstalling.
 
+## Managed fleets
+
+Machines provisioned with `/etc/caelicode/policy.yaml` can pin a
+version, disable self-service updates, or pull releases from an
+internal fork — see [Enterprise & Team Features](enterprise.md).
+Team tool layers added with `caelicode-profile` are re-merged
+automatically on every update.
+
 ## For maintainers: marking a release as re-import-only
 
 Commit a `.reimport-required` file at the repo root before the release

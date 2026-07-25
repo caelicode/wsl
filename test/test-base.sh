@@ -52,6 +52,11 @@ check "caelicode-update exists" test -x /opt/caelicode/current/scripts/caelicode
 check "caelicode-update in PATH" test -L /usr/local/bin/caelicode-update
 check "caelicode-config in PATH" test -L /usr/local/bin/caelicode-config
 check "runtime-init present" test -x /opt/caelicode/current/scripts/caelicode-runtime-init
+check "caelicode-profile present" test -x /opt/caelicode/current/scripts/caelicode-profile
+check "caelicode-profile in PATH" test -L /usr/local/bin/caelicode-profile
+check "caelicode-notify present" test -x /opt/caelicode/current/scripts/caelicode-notify
+check "dns watcher present" test -x /opt/caelicode/current/scripts/caelicode-dns-watch.sh
+check "profiles.d dir exists" test -d /etc/caelicode/profiles.d
 check "update state dir exists" test -d /var/lib/caelicode
 
 # Update-check timer (systemd)

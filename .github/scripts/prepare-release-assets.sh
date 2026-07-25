@@ -35,14 +35,18 @@ if [ -n "${PREDICTED_VERSION:-}" ] && [ "${PREDICTED_VERSION}" != "v${VERSION}" 
     exit 1
 fi
 
-# ── Guard: every profile image must be present ───────────────────────
+# ── Guard: every amd64 profile image must be present ─────────────────
+# (arm64 images are a preview: included when their build legs
+# succeeded, never required.)
 for profile in base sre dev data; do
     if [ ! -f "${DIST}/caelicode-wsl-${profile}.tar.gz" ] || [ ! -f "${DIST}/caelicode-wsl-${profile}.sha256" ]; then
         echo "::error::Missing tested artifact for profile '${profile}' — refusing to release." >&2
         exit 1
     fi
 done
-log "All four tested profile images present"
+log "All four tested amd64 profile images present"
+ARM64_COUNT="$(find "$DIST" -maxdepth 1 -name 'caelicode-wsl-*-arm64.tar.gz' | wc -l | tr -d ' ')"
+log "arm64 preview images included: ${ARM64_COUNT}/4"
 
 # ── Update payload (what caelicode-update applies in place) ──────────
 STAGE="$(mktemp -d)"

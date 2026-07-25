@@ -85,7 +85,7 @@ ENV PATH="/opt/mise/bin:/opt/mise/shims:$PATH"
 # hadolint ignore=DL3008
 RUN install -dm 755 /etc/apt/keyrings && \
     curl -fsSL https://mise.jdx.dev/gpg-key.pub | gpg --dearmor -o /etc/apt/keyrings/mise-archive-keyring.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.gpg arch=amd64] https://mise.jdx.dev/deb stable main" | tee /etc/apt/sources.list.d/mise.list && \
+    echo "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.gpg arch=$(dpkg --print-architecture)] https://mise.jdx.dev/deb stable main" | tee /etc/apt/sources.list.d/mise.list && \
     apt-get update && apt-get install -y --no-install-recommends mise && \
     mkdir -p /opt/mise/bin && \
     ln -sf /usr/bin/mise /opt/mise/bin/mise && \
@@ -136,7 +136,8 @@ ENV STARSHIP_CONFIG=/etc/caelicode/starship.toml
 # stages rename releases/build to the real version and create the
 # symlink; caelicode-update stages new releases the same way and flips
 # the symlink atomically (with rollback to the previous release).
-RUN mkdir -p /opt/caelicode/releases/build /opt/caelicode/test /etc/caelicode /var/lib/caelicode
+RUN mkdir -p /opt/caelicode/releases/build /opt/caelicode/test /etc/caelicode \
+    /etc/caelicode/profiles.d /var/lib/caelicode
 
 # Copy configs
 COPY config/wsl.conf /etc/wsl.conf
@@ -166,12 +167,15 @@ RUN find /opt/caelicode/releases/build/scripts -name "*.sh" -exec chmod +x {} + 
              /opt/caelicode/releases/build/scripts/caelicode-theme \
              /opt/caelicode/releases/build/scripts/caelicode-config \
              /opt/caelicode/releases/build/scripts/caelicode-runtime-init \
+             /opt/caelicode/releases/build/scripts/caelicode-profile \
+             /opt/caelicode/releases/build/scripts/caelicode-notify \
              /opt/caelicode/releases/build/scripts/code && \
     ln -sf /opt/caelicode/current/scripts/caelicode-update /usr/local/bin/caelicode-update && \
     ln -sf /opt/caelicode/current/scripts/health-check.sh /usr/local/bin/caelicode-health && \
     ln -sf /opt/caelicode/current/scripts/code /usr/local/bin/code && \
     ln -sf /opt/caelicode/current/scripts/caelicode-theme /usr/local/bin/caelicode-theme && \
-    ln -sf /opt/caelicode/current/scripts/caelicode-config /usr/local/bin/caelicode-config
+    ln -sf /opt/caelicode/current/scripts/caelicode-config /usr/local/bin/caelicode-config && \
+    ln -sf /opt/caelicode/current/scripts/caelicode-profile /usr/local/bin/caelicode-profile
 
 # Copy profiles (tool-version manifests)
 COPY profiles/ /opt/caelicode/releases/build/profiles/

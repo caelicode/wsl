@@ -1,0 +1,17 @@
+{
+  "name": "CaeliCode Dev",
+  "build": {
+    "context": "..",
+    "dockerfile": "../Dockerfile",
+    "target": "dev-image",
+    "args": { "VERSION": "devcontainer" }
+  },
+  "remoteUser": "caelicode",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh"
+      }
+    }
+  }
+}

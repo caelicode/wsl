@@ -82,15 +82,22 @@ jobs:
           fi
 
   build:
-    name: Build ${{ matrix.profile }}
+    name: Build ${{ matrix.profile }} (${{ matrix.arch }})
     needs: [version]
     # Run for PRs too (version is skipped there and its outputs are empty)
     if: ${{ !cancelled() && (needs.version.result == 'success' || needs.version.result == 'skipped') }}
-    runs-on: ubuntu-24.04
+    # arm64 builds run on native arm runners (free for public repos) —
+    # QEMU emulation of multi-GB toolchain builds is not viable.
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    # arm64 is a PREVIEW: failures annotate the run but never block
+    # amd64 releases. Drop this once the arm64 matrix has a green
+    # track record.
+    continue-on-error: ${{ matrix.arch == 'arm64' }}
     strategy:
       fail-fast: false
       matrix:
         profile: [base, sre, dev, data]
+        arch: [amd64, arm64]
         include:
           - profile: base
             target: base-image
@@ -127,11 +134,12 @@ jobs:
         with:
           context: .
           target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.arch }}
           build-args: VERSION=${{ steps.stamp.outputs.version }}
           tags: caelicode-wsl:${{ matrix.profile }}
           load: true
-          cache-from: type=gha,scope=${{ matrix.profile }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.profile }}
+          cache-from: type=gha,scope=${{ matrix.profile }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.profile }}-${{ matrix.arch }}
           secrets: |
             github_token=${{ secrets.GITHUB_TOKEN }}
 
@@ -153,7 +161,9 @@ jobs:
       - name: Scan image for HIGH/CRITICAL CVEs (informational)
         # Non-blocking for now: surfaces findings in the log without
         # failing the build. Tighten to --exit-code 1 once the baseline
-        # is triaged.
+        # is triaged. amd64 only — the arch-independent findings are
+        # the same and arm64 runners shouldn't pay for a second scan.
+        if: matrix.arch == 'amd64'
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
@@ -186,7 +196,7 @@ jobs:
           fi
 
       - name: Capture resolved tool versions (SBOM input)
-        if: needs.version.outputs.next_version != ''
+        if: needs.version.outputs.next_version != '' && matrix.arch == 'amd64'
         run: |
           mkdir -p toolinfo
           docker run --rm caelicode-wsl:${{ matrix.profile }} \
@@ -199,23 +209,28 @@ jobs:
       - name: Export tested image for release promotion
         if: needs.version.outputs.next_version != ''
         run: |
+          # amd64 keeps the historical unsuffixed asset names; arm64
+          # assets carry a -arm64 suffix (preview).
+          SUFFIX=''
+          [ "${{ matrix.arch }}" = "arm64" ] && SUFFIX='-arm64'
+          NAME="caelicode-wsl-${{ matrix.profile }}${SUFFIX}"
           mkdir -p dist
           CONTAINER=$(docker create caelicode-wsl:${{ matrix.profile }})
-          docker export "$CONTAINER" | gzip > dist/caelicode-wsl-${{ matrix.profile }}.tar.gz
+          docker export "$CONTAINER" | gzip > "dist/${NAME}.tar.gz"
           docker rm -f "$CONTAINER" >/dev/null
           cd dist
-          sha256sum caelicode-wsl-${{ matrix.profile }}.tar.gz > caelicode-wsl-${{ matrix.profile }}.sha256
+          sha256sum "${NAME}.tar.gz" > "${NAME}.sha256"
 
       - name: Upload release artifact
         if: needs.version.outputs.next_version != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: release-${{ matrix.profile }}
+          name: release-${{ matrix.profile }}-${{ matrix.arch }}
           path: dist/
           retention-days: 3
 
       - name: Upload tool info
-        if: needs.version.outputs.next_version != ''
+        if: needs.version.outputs.next_version != '' && matrix.arch == 'amd64'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: toolinfo-${{ matrix.profile }}
@@ -349,7 +364,9 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          # 12 = 4 image tars + 4 sha256 + checksums + sbom + manifest + payload
+          # 12 = the amd64 core: 4 image tars + 4 sha256 + checksums +
+          # sbom + manifest + payload. arm64 (preview) assets are
+          # optional extras on top.
           EXPECTED_ASSETS=12
           gh api "repos/${{ github.repository }}/releases?per_page=15" \
             --jq '.[] | select(.draft == true) | [.id, .tag_name, (.assets | length)] | @tsv' \

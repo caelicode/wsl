@@ -134,20 +134,17 @@ if (-not $isAdmin) {
     return
 }
 
-# ── 2b. Check CPU architecture ──────────────────────────────────────
-# Release images are amd64-only; importing one on ARM64 Windows would
-# "succeed" and then fail with an exec format error at first launch.
-# Check the OS architecture, not the process: an x64-emulated
-# PowerShell on ARM64 reports PROCESSOR_ARCHITECTURE=AMD64.
+# ── 2b. Detect CPU architecture ─────────────────────────────────────
+# ARM64 machines get the -arm64 image assets (preview). Check the OS
+# architecture, not the process: an x64-emulated PowerShell on ARM64
+# reports PROCESSOR_ARCHITECTURE=AMD64.
 $osArch = $env:PROCESSOR_ARCHITEW6432
 if (-not $osArch) { $osArch = $env:PROCESSOR_ARCHITECTURE }
 try { $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() } catch {}
+$ArchSuffix = ''
 if ($osArch -match '^(ARM64|Arm64)$') {
-    Write-Fail "CaeliCode WSL images are x86_64 (amd64) only."
-    Write-Host ""
-    Write-Host "    This machine is ARM64; the imported distro would not boot." -ForegroundColor Yellow
-    Write-Host "    ARM64 images are tracked at: https://github.com/caelicode/wsl/issues" -ForegroundColor Yellow
-    return
+    $ArchSuffix = '-arm64'
+    Write-Host "  ! ARM64 Windows detected — using arm64 image assets (preview)" -ForegroundColor Yellow
 }
 
 # ── 3. Check WSL prerequisites ──────────────────────────────────────
@@ -308,15 +305,20 @@ try {
 $version = $releaseInfo.tag_name
 Write-Success "Release: $version"
 
-# Find the tar.gz and sha256 assets
-$tarAsset = $releaseInfo.assets | Where-Object { $_.name -eq "caelicode-wsl-$CaeliProfile.tar.gz" }
-$shaAsset = $releaseInfo.assets | Where-Object { $_.name -eq "caelicode-wsl-$CaeliProfile.sha256" }
+# Find the tar.gz and sha256 assets (arch-suffixed on ARM64)
+$assetBase = "caelicode-wsl-$CaeliProfile$ArchSuffix"
+$tarAsset = $releaseInfo.assets | Where-Object { $_.name -eq "$assetBase.tar.gz" }
+$shaAsset = $releaseInfo.assets | Where-Object { $_.name -eq "$assetBase.sha256" }
 
 if (-not $tarAsset -or -not $shaAsset) {
     if (-not $tarAsset) {
-        Write-Fail "Profile '$CaeliProfile' not found in release $version."
+        Write-Fail "Asset '$assetBase.tar.gz' not found in release $version."
+        if ($ArchSuffix) {
+            Write-Host "    ARM64 images are a preview: this release may predate them, or its" -ForegroundColor Yellow
+            Write-Host "    arm64 build failed. Watch: https://github.com/$RepoOwner/$RepoName/releases" -ForegroundColor Yellow
+        }
     } else {
-        Write-Fail "Checksum asset for '$CaeliProfile' is missing from release $version — cannot verify a download."
+        Write-Fail "Checksum asset for '$assetBase' is missing from release $version — cannot verify a download."
     }
     Write-Host "    Available assets:" -ForegroundColor Yellow
     $releaseInfo.assets | ForEach-Object { Write-Host "      - $($_.name)" -ForegroundColor DarkGray }
@@ -327,7 +329,7 @@ if (-not $tarAsset -or -not $shaAsset) {
 }
 
 $tarSizeMB = [math]::Round($tarAsset.size / 1MB, 1)
-Write-Step "Downloading caelicode-wsl-$CaeliProfile.tar.gz (${tarSizeMB}MB)..."
+Write-Step "Downloading $($tarAsset.name) (${tarSizeMB}MB)..."
 
 # ── 8. Download to temp ─────────────────────────────────────────────
 $tempDir = Join-Path $env:TEMP "caelicode-wsl-install"

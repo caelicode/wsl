@@ -44,4 +44,17 @@ if cfg_enabled ssh.agent_forwarding true && [ -x "${SCRIPT_DIR}/ssh-bridge.sh" ]
     disown 2>/dev/null || true
 fi
 
+# ── DNS watcher (root; opt-in; single instance via its own lock) ─────
+if cfg_enabled dns.watch_enabled false && [ -x "${SCRIPT_DIR}/caelicode-dns-watch.sh" ]; then
+    sudo -n nohup "${SCRIPT_DIR}/caelicode-dns-watch.sh" >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+fi
+
+# ── Windows toast for pending updates (opt-in; once per version) ─────
+# The systemd timer that runs the check has no Windows interop; this
+# is where the toast actually fires, on the first login of a boot.
+if [ -x "${SCRIPT_DIR}/caelicode-notify" ]; then
+    "${SCRIPT_DIR}/caelicode-notify" update-available >/dev/null 2>&1 || true
+fi
+
 touch "$FLAG" 2>/dev/null || true
