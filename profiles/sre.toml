@@ -1,37 +1,66 @@
+# CaeliCode WSL — sre profile tool pins
+# Every tool is pinned to an exact version for reproducible builds.
+# The `# renovate:` annotations drive automated update PRs (see
+# renovate.json); CI builds validate every bump before it can merge.
 [tools]
+# renovate: datasource=github-tags packageName=python/cpython extractVersion=^v(?<version>.+)$
 python = "3.12.9"
 
 # Modern CLI essentials (inherited from base)
-"github-cli" = "latest"
-fzf = "latest"
-ripgrep = "latest"
-fd = "latest"
-bat = "latest"
-eza = "latest"
-delta = "latest"
+# renovate: datasource=github-releases packageName=cli/cli extractVersion=^v(?<version>.+)$
+"github-cli" = "2.96.0"
+# renovate: datasource=github-releases packageName=junegunn/fzf extractVersion=^v(?<version>.+)$
+fzf = "0.74.1"
+# renovate: datasource=github-releases packageName=BurntSushi/ripgrep
+ripgrep = "15.2.0"
+# renovate: datasource=github-releases packageName=sharkdp/fd extractVersion=^v(?<version>.+)$
+fd = "10.4.2"
+# renovate: datasource=github-releases packageName=sharkdp/bat extractVersion=^v(?<version>.+)$
+bat = "0.26.1"
+# renovate: datasource=github-releases packageName=eza-community/eza extractVersion=^v(?<version>.+)$
+eza = "0.23.5"
+# renovate: datasource=github-releases packageName=dandavison/delta
+delta = "0.19.2"
 # starship is installed directly via its official installer (not mise)
-direnv = "latest"
-zoxide = "latest"
-yq = "latest"
+# renovate: datasource=github-releases packageName=direnv/direnv extractVersion=^v(?<version>.+)$
+direnv = "2.37.1"
+# renovate: datasource=github-releases packageName=ajeetdsouza/zoxide extractVersion=^v(?<version>.+)$
+zoxide = "0.10.0"
+# renovate: datasource=github-releases packageName=mikefarah/yq extractVersion=^v(?<version>.+)$
+yq = "4.53.3"
 
 # Kubernetes & container orchestration
+# renovate: datasource=github-releases packageName=kubernetes/kubernetes extractVersion=^v(?<version>.+)$
 kubectl = "1.35.1"
+# renovate: datasource=github-releases packageName=helm/helm extractVersion=^v(?<version>.+)$
 helm = "4.1.1"
+# renovate: datasource=github-releases packageName=derailed/k9s extractVersion=^v(?<version>.+)$
 k9s = "0.50.18"
+# renovate: datasource=github-releases packageName=argoproj/argo-cd extractVersion=^v(?<version>.+)$
 argocd = "3.3.1"
-kubectx = "latest"
-kustomize = "latest"
-stern = "latest"
-flux2 = "latest"
+# renovate: datasource=github-releases packageName=ahmetb/kubectx extractVersion=^v(?<version>.+)$
+kubectx = "0.11.0"
+# renovate: datasource=github-releases packageName=kubernetes-sigs/kustomize extractVersion=^kustomize/v(?<version>.+)$
+kustomize = "5.8.1"
+# renovate: datasource=github-releases packageName=stern/stern extractVersion=^v(?<version>.+)$
+stern = "1.34.0"
+# renovate: datasource=github-releases packageName=fluxcd/flux2 extractVersion=^v(?<version>.+)$
+flux2 = "2.9.3"
 
 # Infrastructure as Code
+# renovate: datasource=github-releases packageName=hashicorp/terraform extractVersion=^v(?<version>.+)$
 terraform = "1.14.5"
-packer = "latest"
-vault = "latest"
+# renovate: datasource=github-releases packageName=hashicorp/packer extractVersion=^v(?<version>.+)$
+packer = "1.16.0"
+# renovate: datasource=github-releases packageName=hashicorp/vault extractVersion=^v(?<version>.+)$
+vault = "2.0.3"
 
 # Cloud CLIs
-awscli = "latest"
-eksctl = "latest"
+# renovate: datasource=github-tags packageName=aws/aws-cli
+awscli = "2.36.8"
+# renovate: datasource=github-releases packageName=eksctl-io/eksctl extractVersion=^v(?<version>.+)$
+eksctl = "0.229.0"
 
 # Security scanning
+# renovate: datasource=github-releases packageName=aquasecurity/trivy extractVersion=^v(?<version>.+)$
 trivy = "0.71.0"

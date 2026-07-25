@@ -1,0 +1,30 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "labels": ["dependencies"],
+  "schedule": ["before 6am on Monday"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Bump tool pins in profiles/*.toml via '# renovate:' annotations",
+      "managerFilePatterns": ["/^profiles/.*\\.toml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) packageName=(?<packageName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\s*\\n\"?(?<depName>[A-Za-z0-9_.-]+)\"?\\s*=\\s*\"(?<currentValue>[^\"]+)\""
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["docker.io/ubuntu"],
+      "allowedVersions": "/^24\\.04$/",
+      "description": "WSL image profiles currently build against Ubuntu 24.04 LTS; Ubuntu 26.04 Renovate PRs failed all profile builds."
+    },
+    {
+      "matchManagers": ["custom.regex"],
+      "groupName": "tool versions",
+      "automerge": false,
+      "commitMessagePrefix": "deps:"
+    }
+  ]
+}
