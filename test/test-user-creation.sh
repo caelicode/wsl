@@ -3,25 +3,20 @@
 # Tests that the pre-created default user is correctly configured.
 set -euo pipefail
 
-PASS=0; FAIL=0
-
-check() {
-    local name="$1"; shift
-    if "$@" >/dev/null 2>&1; then
-        echo "  ✓ ${name}"; PASS=$((PASS + 1))
-    else
-        echo "  ✗ ${name}"; FAIL=$((FAIL + 1))
-    fi
-}
+# shellcheck source=test/common.sh
+source "$(dirname "$0")/common.sh"
 
 echo "── User Creation Tests ──"
 
 # Default user exists and is configured correctly
 check "caelicode user exists" getent passwd caelicode
+check "caelicode uid is 1000" bash -c '[ "$(id -u caelicode)" = "1000" ]'
+check "stock ubuntu user removed" bash -c '! getent passwd ubuntu'
 check "caelicode home dir" test -d /home/caelicode
 check "caelicode shell is zsh" grep -q "caelicode.*/bin/zsh" /etc/passwd
-check "caelicode in sudo group" id -nG caelicode
+check "caelicode in sudo group" bash -c 'id -nG caelicode | grep -qw sudo'
 check "caelicode sudoers file" test -f /etc/sudoers.d/caelicode
+check "sudoers file mode 0440" bash -c '[ "$(stat -c %a /etc/sudoers.d/caelicode)" = "440" ]'
 
 # Shell config is in place
 check "caelicode has .zshrc" test -f /home/caelicode/.zshrc
@@ -36,6 +31,4 @@ check "Skel .zshrc available" test -f /etc/skel/.zshrc
 # WSL default user is set
 check "wsl.conf default user" grep -q "default = caelicode" /etc/wsl.conf
 
-echo ""
-echo "User Creation Results: ${PASS} passed, ${FAIL} failed"
-[ "$FAIL" -eq 0 ] || exit 1
+summarize "User Creation Results"
