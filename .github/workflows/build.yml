@@ -1,7 +1,18 @@
 # CaeliCode WSL — Build, Test & Release
-# Single workflow: builds all profiles → tests → semantic-release → publish assets.
-# The build job validates images with a SHA version. On release, publish-assets
-# rebuilds from GHA cache with the correct version tag for the final tar.gz.
+#
+# Release integrity model (promote, never rebuild):
+#   1. `version` predicts the next release with a semantic-release dry
+#      run, so images can be stamped with their REAL version at build
+#      time.
+#   2. `build` builds + tests each profile, then exports THAT tested
+#      image as the release artifact — the published tar is
+#      byte-identical to what CI validated (no cache-dependent rebuild).
+#   3. `release` runs semantic-release: the prepare step (exec plugin)
+#      assembles manifest/payload/SBOM and asserts the predicted version
+#      matches BEFORE any tag exists; the GitHub release is created as a
+#      DRAFT with all assets attached, then flipped to published as the
+#      final step. A failure anywhere leaves either no release or an
+#      invisible draft — never a public release without assets.
 
 name: Build & Release
 
@@ -11,17 +22,63 @@ on:
     paths-ignore: ["docs/**", "*.md", "LICENSE"]
   pull_request:
     branches: [main]
+  # Recovery lever: re-run the pipeline for main without a new commit
+  # (e.g. a transient failure between draft creation and publishing).
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  # Serialize main pipelines instead of cancelling them — cancelling a
+  # main run mid-release is how tags end up without published assets.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  version:
+    name: Predict next version
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      # semantic-release verifies push permission even in --dry-run
+      contents: write
+    outputs:
+      next_version: ${{ steps.dryrun.outputs.next_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install release toolchain (locked)
+        run: npm ci
+
+      - name: Dry-run semantic-release
+        id: dryrun
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx semantic-release --dry-run 2>&1 | tee dryrun.log || true
+          NEXT="$(sed -n 's/.*The next release version is \([0-9][0-9a-zA-Z.-]*\).*/\1/p' dryrun.log | tail -1)"
+          echo "next_version=${NEXT}" >> "$GITHUB_OUTPUT"
+          if [ -n "$NEXT" ]; then
+            echo "Next release: v${NEXT}"
+          else
+            echo "No release will be produced by this push."
+          fi
+
   build:
     name: Build ${{ matrix.profile }}
+    needs: [version]
+    # Run for PRs too (version is skipped there and its outputs are empty)
+    if: ${{ !cancelled() && (needs.version.result == 'success' || needs.version.result == 'skipped') }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -48,12 +105,22 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
 
+      - name: Resolve image version stamp
+        id: stamp
+        run: |
+          NEXT='${{ needs.version.outputs.next_version }}'
+          if [ -n "$NEXT" ]; then
+            echo "version=v${NEXT}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build ${{ matrix.profile }} image
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
         with:
           context: .
           target: ${{ matrix.target }}
-          build-args: VERSION=${{ github.sha }}
+          build-args: VERSION=${{ steps.stamp.outputs.version }}
           tags: caelicode-wsl:${{ matrix.profile }}
           load: true
           cache-from: type=gha,scope=${{ matrix.profile }}
@@ -70,6 +137,23 @@ jobs:
         run: |
           docker run --rm caelicode-wsl:${{ matrix.profile }} \
             bash /opt/caelicode/test/test-networking.sh
+
+      - name: Run user creation tests
+        run: |
+          docker run --rm caelicode-wsl:${{ matrix.profile }} \
+            bash /opt/caelicode/test/test-user-creation.sh
+
+      - name: Scan image for HIGH/CRITICAL CVEs (informational)
+        # Non-blocking for now: surfaces findings in the log without
+        # failing the build. Tighten to --exit-code 1 once the baseline
+        # is triaged.
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest image \
+            --severity HIGH,CRITICAL --exit-code 0 --timeout 20m \
+            --scanners vuln caelicode-wsl:${{ matrix.profile }} \
+            || echo "::warning::trivy scan did not complete for ${{ matrix.profile }}"
 
       - name: Check image size
         run: |
@@ -94,6 +178,43 @@ jobs:
             exit 1
           fi
 
+      - name: Capture resolved tool versions (SBOM input)
+        if: needs.version.outputs.next_version != ''
+        run: |
+          mkdir -p toolinfo
+          docker run --rm caelicode-wsl:${{ matrix.profile }} \
+            bash -c 'mise ls --current --json 2>/dev/null || echo "{}"' \
+            > toolinfo/mise-${{ matrix.profile }}.json
+          docker run --rm caelicode-wsl:${{ matrix.profile }} \
+            bash -c 'dpkg-query -W -f "\${Package}\t\${Version}\n"' \
+            > toolinfo/dpkg-${{ matrix.profile }}.tsv
+
+      - name: Export tested image for release promotion
+        if: needs.version.outputs.next_version != ''
+        run: |
+          mkdir -p dist
+          CONTAINER=$(docker create caelicode-wsl:${{ matrix.profile }})
+          docker export "$CONTAINER" | gzip > dist/caelicode-wsl-${{ matrix.profile }}.tar.gz
+          docker rm -f "$CONTAINER" >/dev/null
+          cd dist
+          sha256sum caelicode-wsl-${{ matrix.profile }}.tar.gz > caelicode-wsl-${{ matrix.profile }}.sha256
+
+      - name: Upload release artifact
+        if: needs.version.outputs.next_version != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-${{ matrix.profile }}
+          path: dist/
+          retention-days: 3
+
+      - name: Upload tool info
+        if: needs.version.outputs.next_version != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: toolinfo-${{ matrix.profile }}
+          path: toolinfo/
+          retention-days: 3
+
   lint:
     name: Lint scripts
     runs-on: ubuntu-24.04
@@ -106,7 +227,14 @@ jobs:
 
       - name: ShellCheck scripts
         run: |
-          shellcheck -x scripts/*.sh scripts/caelicode-update scripts/code scripts/caelicode-theme build.sh test/*.sh
+          shellcheck -x \
+            scripts/*.sh \
+            scripts/caelicode-update scripts/caelicode-theme \
+            scripts/caelicode-config scripts/caelicode-runtime-init \
+            scripts/code \
+            .github/scripts/*.sh \
+            build.sh test/*.sh
+          shellcheck --shell=bash scripts/caelicode-motd.sh
 
       - name: Validate Dockerfile
         uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
@@ -115,13 +243,15 @@ jobs:
           failure-threshold: warning
 
   release:
-    name: Semantic Release
-    needs: [build, lint]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    name: Release
+    needs: [version, build, lint]
+    if: >
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main' &&
+      needs.version.outputs.next_version != ''
     runs-on: ubuntu-24.04
-    outputs:
-      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
-      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
+    permissions:
+      contents: write
     steps:
       - name: Generate GitHub App token
         id: app-token
@@ -136,179 +266,54 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 22
-
-      - name: Install semantic-release
-        run: npm install --no-save semantic-release @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/github conventional-changelog-conventionalcommits
-
-      - name: Run semantic-release
-        id: semantic
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          GIT_AUTHOR_NAME: github-actions[bot]
-          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
-          GIT_COMMITTER_NAME: github-actions[bot]
-          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
-        run: |
-          # Capture the latest tag BEFORE semantic-release runs
-          BEFORE_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
-          echo "Tag before: $BEFORE_TAG"
-
-          npx semantic-release
-
-          # Fetch the tag that semantic-release may have pushed
-          git fetch --tags
-
-          AFTER_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
-          echo "Tag after: $AFTER_TAG"
-
-          if [ "$BEFORE_TAG" != "$AFTER_TAG" ] && [ "$AFTER_TAG" != "none" ]; then
-            echo "new_release_published=true" >> "$GITHUB_OUTPUT"
-            echo "new_release_version=${AFTER_TAG#v}" >> "$GITHUB_OUTPUT"
-            echo "New release: $AFTER_TAG"
-          else
-            echo "new_release_published=false" >> "$GITHUB_OUTPUT"
-            echo "No new release created"
-          fi
-
-  publish-assets:
-    name: Publish ${{ matrix.profile }}
-    needs: release
-    if: needs.release.outputs.new_release_published == 'true'
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: true
-      matrix:
-        profile: [base, sre, dev, data]
-        include:
-          - profile: base
-            target: base-image
-          - profile: sre
-            target: sre-image
-          - profile: dev
-            target: dev-image
-          - profile: data
-            target: data-image
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
-
-      - name: Rebuild ${{ matrix.profile }} with release version (cache hit)
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
-        with:
-          context: .
-          target: ${{ matrix.target }}
-          build-args: VERSION=v${{ needs.release.outputs.new_release_version }}
-          tags: caelicode-wsl:${{ matrix.profile }}
-          load: true
-          cache-from: type=gha,scope=${{ matrix.profile }}
-          secrets: |
-            github_token=${{ secrets.GITHUB_TOKEN }}
-
-      - name: Export tar
-        run: |
-          mkdir -p dist
-          CONTAINER=$(docker run --privileged -dt caelicode-wsl:${{ matrix.profile }} bash)
-          docker export "$CONTAINER" | gzip > dist/caelicode-wsl-${{ matrix.profile }}.tar.gz
-          docker rm -f "$CONTAINER"
-
-      - name: Generate checksum
-        run: |
-          cd dist
-          sha256sum caelicode-wsl-${{ matrix.profile }}.tar.gz > caelicode-wsl-${{ matrix.profile }}.sha256
-
-      - name: Upload release artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: release-${{ matrix.profile }}
-          path: dist/
-
-  publish-release:
-    name: Publish GitHub Release
-    needs: [release, publish-assets]
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
-      - name: Download all release artifacts
+      - name: Download tested image artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: dist
           pattern: release-*
           merge-multiple: true
 
-      - name: Generate SBOM
-        run: |
-          python3 -c "
-          import json, tomllib, pathlib
-
-          sbom = {
-              'bomFormat': 'CycloneDX',
-              'specVersion': '1.5',
-              'version': 'v${{ needs.release.outputs.new_release_version }}',
-              'components': []
-          }
-
-          for toml_file in sorted(pathlib.Path('profiles').glob('*.toml')):
-              with open(toml_file, 'rb') as f:
-                  data = tomllib.load(f)
-              profile = toml_file.stem
-              for tool, version in data.get('tools', {}).items():
-                  sbom['components'].append({
-                      'type': 'application',
-                      'name': tool,
-                      'version': version,
-                      'group': f'caelicode-wsl/{profile}'
-                  })
-
-          print(json.dumps(sbom, indent=2))
-          " > dist/sbom.json
-
-      - name: Merge checksums
-        run: |
-          cat dist/*.sha256 > dist/checksums.txt
-
-      - name: Upload assets to GitHub Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+      - name: Download tool info
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          tag_name: v${{ needs.release.outputs.new_release_version }}
-          append_body: true
-          body: |
+          path: dist/toolinfo
+          pattern: toolinfo-*
+          merge-multiple: true
 
-            ---
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
 
-            ### Profile images
-            | Profile | Description |
-            |---------|-------------|
-            | `caelicode-wsl-base.tar.gz` | Core tools (git, curl, jq, Python, mise) |
-            | `caelicode-wsl-sre.tar.gz` | SRE/Platform (kubectl, helm, terraform, k9s, argocd, trivy) |
-            | `caelicode-wsl-dev.tar.gz` | Development (Node.js, Go, Rust, podman, uv) |
-            | `caelicode-wsl-data.tar.gz` | Data Engineering (Python, dbt, PostgreSQL client, uv) |
+      - name: Install release toolchain (locked)
+        run: npm ci
 
-            ### Install
-            ```powershell
-            wsl --import caelicode-sre C:\wsl\caelicode caelicode-wsl-sre.tar.gz
-            wsl -d caelicode-sre
-            ```
+      - name: Run semantic-release (draft release + assets)
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          PREDICTED_VERSION: v${{ needs.version.outputs.next_version }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+        run: npx semantic-release
 
-            ### Verify
-            ```bash
-            caelicode-health
-            ```
-
-            See [Getting Started](docs/getting-started.md) for full instructions.
-          files: |
-            dist/*.tar.gz
-            dist/*.sha256
-            dist/checksums.txt
-            dist/sbom.json
-          draft: false
-          prerelease: false
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          if [ ! -f dist/RELEASE_VERSION ]; then
+            echo "::error::semantic-release completed without preparing assets (dist/RELEASE_VERSION missing)"
+            exit 1
+          fi
+          VER="v$(cat dist/RELEASE_VERSION)"
+          ID="$(gh api "repos/${{ github.repository }}/releases" \
+                --jq ".[] | select(.tag_name==\"${VER}\") | .id" | head -1)"
+          if [ -z "$ID" ]; then
+            echo "::error::No release found for tag ${VER}"
+            exit 1
+          fi
+          gh api -X PATCH "repos/${{ github.repository }}/releases/${ID}" \
+            -F draft=false >/dev/null
+          echo "Release ${VER} published with all assets attached."

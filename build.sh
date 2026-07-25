@@ -67,7 +67,8 @@ build_profile() {
 
     echo "Exporting ${image_name} → ${TAR_DIR}/${tar_name}"
     local container_id
-    container_id="$($RUNTIME run --privileged -dt "${image_name}:${VERSION}" bash)"
+    # create (not run): exporting a filesystem needs no running container
+    container_id="$($RUNTIME create "${image_name}:${VERSION}")"
     $RUNTIME export "$container_id" > "${TAR_DIR}/${tar_name}"
     $RUNTIME rm -f "$container_id" >/dev/null 2>&1
 
