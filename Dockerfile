@@ -77,6 +77,15 @@ RUN git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git /opt/oh-my-zsh &&
 ENV MISE_DATA_DIR=/opt/mise
 ENV XDG_DATA_HOME=/opt/mise
 ENV MISE_CONFIG_DIR=/opt/mise/config
+# Rust (mise core plugin) installs via rustup, which defaults to the
+# invoking user's HOME (/root/.rustup at build) — invisible to the
+# non-root default user and unreachable by the shim bypass. Pin both
+# under /opt/mise so the toolchain is system-wide. RUSTUP_HOME is also
+# persisted for runtime (the cargo/bin rustup proxies dispatch through
+# it); CARGO_HOME is build-only so user `cargo install` writes default
+# to ~/.cargo.
+ENV RUSTUP_HOME=/opt/mise/rustup
+ENV CARGO_HOME=/opt/mise/cargo
 # Shims are in PATH during build only (for mise reshim to work).
 # At runtime in WSL, shims are NOT in PATH — direct symlinks in
 # /opt/mise/bin/ are used instead (see shim bypass step below).
@@ -209,6 +218,7 @@ RUN userdel -r ubuntu 2>/dev/null || true && \
 RUN echo 'PATH="/opt/mise/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/environment && \
     echo 'MISE_DATA_DIR="/opt/mise"' >> /etc/environment && \
     echo 'MISE_CONFIG_DIR="/opt/mise/config"' >> /etc/environment && \
+    echo 'RUSTUP_HOME="/opt/mise/rustup"' >> /etc/environment && \
     echo 'STARSHIP_CONFIG="/etc/caelicode/starship.toml"' >> /etc/environment
 COPY config/caelicode-env.sh /etc/profile.d/00-caelicode-env.sh
 
