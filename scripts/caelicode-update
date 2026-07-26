@@ -439,7 +439,9 @@ if [ "$MODE" = "check" ]; then
     write_state "$LATEST_VERSION" true "$REQUIRES_REIMPORT" "$NOTES_URL"
     # Opt-in Windows toast (no-op without interop, e.g. from the timer;
     # runtime-init retries with interop on the next login).
-    [ -x "${SELF_DIR}/caelicode-notify" ] && "${SELF_DIR}/caelicode-notify" update-available >/dev/null 2>&1 || true
+    if [ -x "${SELF_DIR}/caelicode-notify" ]; then
+        "${SELF_DIR}/caelicode-notify" update-available >/dev/null 2>&1 || true
+    fi
     if [ "$REQUIRES_REIMPORT" = "true" ]; then
         log "Update available: ${CURRENT_VERSION} → ${LATEST_VERSION} (requires full re-import — run: caelicode-update --full)"
         exit 20

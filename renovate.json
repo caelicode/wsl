@@ -3,6 +3,7 @@
   "extends": ["config:recommended"],
   "labels": ["dependencies"],
   "schedule": ["before 6am on Monday"],
+  "minimumReleaseAge": "7 days",
   "customManagers": [
     {
       "customType": "regex",

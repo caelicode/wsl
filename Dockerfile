@@ -229,6 +229,11 @@ RUN echo "base" > /opt/caelicode/PROFILE && \
     mv /opt/caelicode/releases/build "/opt/caelicode/releases/${VERSION}" && \
     ln -sfn "releases/${VERSION}" /opt/caelicode/current
 
+# Default to the non-root user (matches the WSL default user; anything
+# run via plain `docker run` follows least privilege too).
+USER caelicode
+WORKDIR /home/caelicode
+
 
 ###############################################################################
 # SRE — Platform engineering & Kubernetes tools
@@ -271,6 +276,11 @@ RUN echo "sre" > /opt/caelicode/PROFILE && \
     mv /opt/caelicode/releases/build "/opt/caelicode/releases/${VERSION}" && \
     ln -sfn "releases/${VERSION}" /opt/caelicode/current
 
+# Default to the non-root user (matches the WSL default user; anything
+# run via plain `docker run` follows least privilege too).
+USER caelicode
+WORKDIR /home/caelicode
+
 
 ###############################################################################
 # DEV — Software development tools
@@ -304,6 +314,11 @@ RUN echo "dev" > /opt/caelicode/PROFILE && \
     echo "${VERSION}" > /opt/caelicode/VERSION && \
     mv /opt/caelicode/releases/build "/opt/caelicode/releases/${VERSION}" && \
     ln -sfn "releases/${VERSION}" /opt/caelicode/current
+
+# Default to the non-root user (matches the WSL default user; anything
+# run via plain `docker run` follows least privilege too).
+USER caelicode
+WORKDIR /home/caelicode
 
 
 ###############################################################################
@@ -345,3 +360,8 @@ RUN echo "data" > /opt/caelicode/PROFILE && \
     echo "${VERSION}" > /opt/caelicode/VERSION && \
     mv /opt/caelicode/releases/build "/opt/caelicode/releases/${VERSION}" && \
     ln -sfn "releases/${VERSION}" /opt/caelicode/current
+
+# Default to the non-root user (matches the WSL default user; anything
+# run via plain `docker run` follows least privilege too).
+USER caelicode
+WORKDIR /home/caelicode

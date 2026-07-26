@@ -75,7 +75,9 @@ check "appendWindowsPath disabled" grep -q "appendWindowsPath = false" /etc/wsl.
 check "default user in wsl.conf" grep -q "default = caelicode" /etc/wsl.conf
 check "caelicode user exists" getent passwd caelicode
 check "caelicode user has zsh shell" grep -q "caelicode.*zsh" /etc/passwd
-check "caelicode user has sudo" test -f /etc/sudoers.d/caelicode
+# sudo -n: /etc/sudoers.d is root-only and the suite runs as the image's
+# non-root default user — this also proves NOPASSWD sudo actually works.
+check "caelicode user has sudo" sudo -n test -f /etc/sudoers.d/caelicode
 check "caelicode user has .zshrc" test -f /home/caelicode/.zshrc
 check "profile.d env script" test -f /etc/profile.d/00-caelicode-env.sh
 

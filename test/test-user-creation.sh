@@ -16,9 +16,11 @@ check "stock ubuntu user removed" bash -c '! getent passwd ubuntu'
 check "caelicode home dir" test -d /home/caelicode
 check "caelicode shell is zsh" grep -q "caelicode.*/bin/zsh" /etc/passwd
 check "caelicode in sudo group" bash -c 'id -nG caelicode | grep -qw sudo'
-check "caelicode sudoers file" test -f /etc/sudoers.d/caelicode
+# sudo -n: /etc/sudoers.d is root-only and the suite runs as the image's
+# non-root default user — these also prove NOPASSWD sudo actually works.
+check "caelicode sudoers file" sudo -n test -f /etc/sudoers.d/caelicode
 # shellcheck disable=SC2016  # expansion must happen inside bash -c, not here
-check "sudoers file mode 0440" bash -c '[ "$(stat -c %a /etc/sudoers.d/caelicode)" = "440" ]'
+check "sudoers file mode 0440" bash -c '[ "$(sudo -n stat -c %a /etc/sudoers.d/caelicode)" = "440" ]'
 
 # Shell config is in place
 check "caelicode has .zshrc" test -f /home/caelicode/.zshrc

@@ -144,7 +144,10 @@ cmd_list() {
 
 cmd_add() {
     local name="${1:-}" source="${2:-}" yes="${3:-}"
-    [ -n "$name" ] && [ -n "$source" ] || { err "usage: caelicode-profile add <name> <url|file> [--yes]"; exit 2; }
+    if [ -z "$name" ] || [ -z "$source" ]; then
+        err "usage: caelicode-profile add <name> <url|file> [--yes]"
+        exit 2
+    fi
     [[ "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { err "layer name must be lowercase alphanumeric/hyphen"; exit 2; }
     require_sudo
 
