@@ -6,7 +6,9 @@ if command -v eza &>/dev/null; then
     alias ll='eza -alF --icons'
     alias la='eza -a --icons'
     alias l='eza -F --icons'
-    alias tree='eza --tree --icons'
+    # NOTE: deliberately NOT aliasing `tree` — the real tree(1) is
+    # installed and eza --tree does not accept tree's flags (-L, -d …).
+    alias lt='eza --tree --icons'
 else
     alias ll='ls -alF --color=auto'
     alias la='ls -A --color=auto'
@@ -33,18 +35,22 @@ alias gcm='git commit -m'
 command -v lazygit &>/dev/null && alias lg='lazygit'
 
 # ── Kubernetes (SRE profile) ──────────────────────────────────────
-alias k='kubectl'
-alias kgp='kubectl get pods'
-alias kgs='kubectl get svc'
-alias kgn='kubectl get nodes'
+if command -v kubectl &>/dev/null; then
+    alias k='kubectl'
+    alias kgp='kubectl get pods'
+    alias kgs='kubectl get svc'
+    alias kgn='kubectl get nodes'
+fi
 command -v kubens &>/dev/null && alias kns='kubens'
 command -v kubectx &>/dev/null && alias kctx='kubectx'
 
 # ── Terraform (SRE profile) ───────────────────────────────────────
-alias tf='terraform'
-alias tfi='terraform init'
-alias tfp='terraform plan'
-alias tfa='terraform apply'
+if command -v terraform &>/dev/null; then
+    alias tf='terraform'
+    alias tfi='terraform init'
+    alias tfp='terraform plan'
+    alias tfa='terraform apply'
+fi
 
 # ── Cloud CLIs ─────────────────────────────────────────────────────
 command -v aws &>/dev/null && alias awsid='aws sts get-caller-identity'

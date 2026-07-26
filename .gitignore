@@ -5,7 +5,8 @@ images/
 
 # Node (semantic-release)
 node_modules/
-package-lock.json
+# package-lock.json is COMMITTED: the release job runs `npm ci` so the
+# toolchain that cuts releases is pinned, not resolved fresh each run.
 
 # OS
 .DS_Store
@@ -16,3 +17,7 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Python
+__pycache__/
+*.pyc

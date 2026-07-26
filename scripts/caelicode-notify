@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# CaeliCode WSL — Windows toast notification for available updates
+#
+# Opt-in via updates.notify_windows_toast in /etc/caelicode/config.yaml
+# (default: false — a distro should not pop OS notifications uninvited).
+# Fires at most ONCE per release version per user, tracked in
+# ~/.local/state/caelicode/last-toast. Reads only the local update
+# state cache; never touches the network. Silently a no-op when
+# Windows interop is unavailable (e.g. inside the systemd timer).
+#
+# Usage: caelicode-notify update-available
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CFG="${SCRIPT_DIR}/caelicode-config"
+STATE_FILE="/var/lib/caelicode/update-state.json"
+POWERSHELL="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+MARKER_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/caelicode"
+MARKER="${MARKER_DIR}/last-toast"
+
+[ "${1:-}" = "update-available" ] || { echo "Usage: caelicode-notify update-available" >&2; exit 2; }
+
+# Opt-in gate (default false)
+if [ ! -x "$CFG" ] || ! "$CFG" is-enabled updates.notify_windows_toast false; then
+    exit 0
+fi
+
+# Preconditions: state cache, jq, Windows interop
+[ -r "$STATE_FILE" ] || exit 0
+command -v jq >/dev/null 2>&1 || exit 0
+[ -x "$POWERSHELL" ] || exit 0
+[ "$(jq -r '.available // false' "$STATE_FILE" 2>/dev/null)" = "true" ] || exit 0
+
+LATEST="$(jq -r '.latest // empty' "$STATE_FILE" 2>/dev/null)"
+CURRENT="$(cat /opt/caelicode/VERSION 2>/dev/null || echo "?")"
+REIMPORT="$(jq -r '.requires_reimport // false' "$STATE_FILE" 2>/dev/null)"
+
+# These strings are embedded in a PowerShell command line: accept only
+# a strict version-ish charset, or stay silent.
+[[ "$LATEST" =~ ^[A-Za-z0-9._-]+$ ]] || exit 0
+[[ "$CURRENT" =~ ^[A-Za-z0-9._-]+$ ]] || CURRENT="?"
+
+# One toast per version
+if [ -r "$MARKER" ] && [ "$(cat "$MARKER" 2>/dev/null)" = "$LATEST" ]; then
+    exit 0
+fi
+
+ACTION="Run: caelicode-update"
+[ "$REIMPORT" = "true" ] && ACTION="Major upgrade - run: caelicode-update --full"
+
+"$POWERSHELL" -NoProfile -NonInteractive -Command "
+\$ErrorActionPreference = 'SilentlyContinue'
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+\$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+\$texts = \$xml.GetElementsByTagName('text')
+\$texts.Item(0).AppendChild(\$xml.CreateTextNode('CaeliCode WSL update available')) | Out-Null
+\$texts.Item(1).AppendChild(\$xml.CreateTextNode('${CURRENT} -> ${LATEST}. ${ACTION}')) | Out-Null
+\$appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe'
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(\$appId).Show([Windows.UI.Notifications.ToastNotification]::new(\$xml))
+" >/dev/null 2>&1 || exit 0
+
+mkdir -p "$MARKER_DIR" 2>/dev/null || exit 0
+printf '%s\n' "$LATEST" > "$MARKER" 2>/dev/null || true

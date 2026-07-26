@@ -2,16 +2,8 @@
 # CaeliCode WSL — Networking tests (run inside container)
 set -euo pipefail
 
-PASS=0; FAIL=0
-
-check() {
-    local name="$1"; shift
-    if "$@" >/dev/null 2>&1; then
-        echo "  ✓ ${name}"; PASS=$((PASS + 1))
-    else
-        echo "  ✗ ${name}"; FAIL=$((FAIL + 1))
-    fi
-}
+# shellcheck source=test/common.sh
+source "$(dirname "$0")/common.sh"
 
 echo "── Networking Tests ──"
 
@@ -32,6 +24,4 @@ fi
 check "CA bundle exists" test -f /etc/ssl/certs/ca-certificates.crt
 check "CA bundle non-empty" test -s /etc/ssl/certs/ca-certificates.crt
 
-echo ""
-echo "Networking Results: ${PASS} passed, ${FAIL} failed"
-[ "$FAIL" -eq 0 ] || exit 1
+summarize "Networking Results"

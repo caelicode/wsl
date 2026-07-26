@@ -1,75 +1,139 @@
 #!/usr/bin/env bash
 # CaeliCode WSL — In-place updater
-# Updates scripts, configs, tool versions, and shell templates from the latest
-# GitHub release — without reimporting the entire WSL distro.
+#
+# Staged, checksum-verified updates from GitHub releases without
+# reimporting the WSL distro. Releases are staged under
+# /opt/caelicode/releases/<version> and activated by flipping the
+# /opt/caelicode/current symlink, so a failed update never leaves a
+# half-applied system and --rollback is a symlink flip away.
 # User home directories and personal settings are never touched.
 #
 # Usage:
-#   caelicode-update              # Update to latest
-#   caelicode-update --dry-run    # Show what would change
-#   caelicode-update --version    # Show current version
-#   caelicode-update --full       # Full re-import guide (major upgrades)
+#   caelicode-update                  # Update to latest release
+#   caelicode-update --check          # Check only (exit 0 up-to-date,
+#                                     #   10 update available, 20 update
+#                                     #   requires re-import, 1 error)
+#   caelicode-update --dry-run        # Show what would change
+#   caelicode-update --version        # Show installed version/profile
+#   caelicode-update --version vX.Y.Z # Update (or pin back) to a tag
+#   caelicode-update --rollback       # Return to the previous release
+#   caelicode-update --full           # Full re-import guide (major upgrades)
 #
-# NOTE: The entire script is wrapped in main() so bash reads the whole file
-# into memory before executing. This prevents breakage when the updater
-# overwrites itself during the scripts copy step.
+# NOTE: The entire script is wrapped in main() so bash reads the whole
+# file into memory before executing. Combined with the staged layout
+# (the running copy lives in the previous release dir until pruning),
+# this makes self-update safe.
 
 main() {
 
 set -euo pipefail
 
 REPO="caelicode/wsl"
-INSTALL_DIR="/opt/caelicode"
+API_BASE="https://api.github.com/repos/${REPO}"
+BASE_DIR="/opt/caelicode"
+RELEASES_DIR="${BASE_DIR}/releases"
+CURRENT_LINK="${BASE_DIR}/current"
 ETC_DIR="/etc/caelicode"
 SKEL_DIR="/etc/skel"
 MISE_CONFIG="/opt/mise/config/config.toml"
-VERSION_FILE="${INSTALL_DIR}/VERSION"
-PROFILE_FILE="${INSTALL_DIR}/PROFILE"
-TEMP_DIR="$(mktemp -d)"
+VERSION_FILE="${BASE_DIR}/VERSION"
+PROFILE_FILE="${BASE_DIR}/PROFILE"
+PREVIOUS_FILE="${BASE_DIR}/PREVIOUS"
+STATE_DIR="/var/lib/caelicode"
+STATE_FILE="${STATE_DIR}/update-state.json"
+ETAG_FILE="${STATE_DIR}/release-check.etag"
+RELEASE_CACHE="${STATE_DIR}/release-latest.json"
+MANIFEST_ASSET="caelicode-manifest.json"
+PAYLOAD_ASSET="caelicode-update-payload.tar.gz"
 
+TEMP_DIR="$(mktemp -d)"
 # shellcheck disable=SC2064
 trap "rm -rf $TEMP_DIR" EXIT
 
-log()  { echo "[caelicode-update] $*"; }
+# Companion scripts live beside this one (whether invoked from
+# /opt/caelicode/current/scripts or via the /usr/local/bin symlinks,
+# which point at siblings).
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+QUIET=false
+log()  { $QUIET || echo "[caelicode-update] $*"; }
 err()  { echo "[caelicode-update] ERROR: $*" >&2; }
 warn() { echo "[caelicode-update] WARNING: $*" >&2; }
 
+# Root shells run commands directly; everyone else needs passwordless sudo.
+if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+
+require_sudo() {
+    if [ -n "$SUDO" ] && ! sudo -n true 2>/dev/null; then
+        err "This step needs sudo without a password prompt."
+        err "Run inside an interactive shell (sudo caelicode-update), or restore"
+        err "the default NOPASSWD rule in /etc/sudoers.d/caelicode."
+        exit 1
+    fi
+}
+
 # ── Parse Arguments ──────────────────────────────────────────────────
-DRY_RUN=false
-SHOW_VERSION=false
-FULL_UPGRADE=false
+MODE="update"           # update | check | dry-run | show-version | rollback | full
+TARGET_VERSION=""       # explicit tag for --version <tag>
+FORCE=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dry-run)   DRY_RUN=true; shift ;;
-        --version)   SHOW_VERSION=true; shift ;;
-        --full)      FULL_UPGRADE=true; shift ;;
+        --check)     MODE="check"; shift ;;
+        --dry-run)   MODE="dry-run"; shift ;;
+        --rollback)  MODE="rollback"; shift ;;
+        --full)      MODE="full"; shift ;;
+        --force)     FORCE=true; shift ;;
+        --quiet|-q)  QUIET=true; shift ;;
+        --version)
+            shift
+            if [[ $# -gt 0 && "$1" != -* ]]; then
+                TARGET_VERSION="$1"; shift
+            else
+                MODE="show-version"
+            fi
+            ;;
         -h|--help)
             cat <<'HELP'
 Usage: caelicode-update [OPTIONS]
 
-Updates CaeliCode WSL scripts, configs, and tool versions from the
-latest GitHub release. Your home directory is never modified.
+Staged, checksum-verified updates of CaeliCode WSL scripts, configs,
+and tool versions from GitHub releases. Your home directory is never
+modified.
 
 Options:
-  --dry-run   Show what would change without applying
-  --version   Show current installed version and profile
-  --full      Show guide for a full distro re-import (major upgrades)
-  -h, --help  Show this help message
+  (none)             Update to the latest release
+  --check            Check for updates without applying. Exit codes:
+                       0  up to date
+                       10 update available (in-place)
+                       20 update available (requires full re-import)
+                       1  check failed
+  --dry-run          Show what would change without applying
+  --version          Show the installed version and profile
+  --version <tag>    Update (or pin back) to a specific release tag
+  --rollback         Switch back to the previously installed release
+  --full             Show the guide for a full distro re-import
+  --force            Repair mode: re-apply even when already up to
+                     date (re-stages, re-runs mise, regenerates the
+                     /opt/mise/bin symlinks), and apply in-place even
+                     when the release is marked as requiring a
+                     re-import
+  --quiet, -q        Suppress informational output (used by the
+                     scheduled update check)
+  -h, --help         Show this help message
 
 What gets updated:
-  • /opt/caelicode/scripts/      Runtime scripts (DNS, SSH, proxy, update)
-  • /opt/caelicode/profiles/     Tool version manifests (TOML)
-  • /opt/caelicode/themes/       Starship prompt themes
-  • /etc/caelicode/              Starship prompt, branding config
-  • /etc/skel/                   Shell templates for new users
-  • mise tools                   Installed versions are upgraded to match
+  • /opt/caelicode/releases/<ver>/   Staged release (scripts, profiles, themes)
+  • /opt/caelicode/current           Symlink flip — the atomic activation step
+  • /etc/caelicode/starship.toml     Only if you have not customized it
+  • /etc/skel/                       Shell templates for new users
+  • mise tools                       Reinstalled to the new pinned versions,
+                                     with /opt/mise/bin symlinks regenerated
 
 What is NOT touched:
-  • Your home directory (~/)
-  • Your personal dotfiles
-  • Any systemd service changes (requires full re-import)
-  • Any new apt packages (requires full re-import)
+  • Your home directory (~/) and personal dotfiles
+  • /etc/caelicode/config.yaml
+  • apt packages (those need a full re-import — see --full)
 HELP
             exit 0
             ;;
@@ -84,213 +148,592 @@ done
 CURRENT_VERSION="$(cat "$VERSION_FILE" 2>/dev/null || echo "unknown")"
 CURRENT_PROFILE="$(cat "$PROFILE_FILE" 2>/dev/null || echo "unknown")"
 
-if $SHOW_VERSION; then
+if [ "$MODE" = "show-version" ]; then
     echo "CaeliCode WSL ${CURRENT_VERSION}"
     echo "Profile: ${CURRENT_PROFILE}"
+    if [ -f "$PREVIOUS_FILE" ]; then
+        echo "Rollback available to: $(cat "$PREVIOUS_FILE")"
+    fi
     exit 0
 fi
 
 # ── Full Upgrade Guide ───────────────────────────────────────────────
-if $FULL_UPGRADE; then
+if [ "$MODE" = "full" ]; then
     DISTRO_NAME="caelicode-${CURRENT_PROFILE}"
     cat <<EOF
 
 ╔═══════════════════════════════════════════════════════════════╗
-║  CaeliCode WSL — Full Distro Upgrade                        ║
+║  CaeliCode WSL — Full Distro Upgrade                          ║
 ╚═══════════════════════════════════════════════════════════════╝
 
 Use this when a release includes new system packages, OS-level
 changes, or breaking updates that can't be applied in-place.
 
-Step 1 — Back up your data:
+Step 1 — Back up (from PowerShell, recommended):
+  irm https://raw.githubusercontent.com/${REPO}/main/tools/caelicode-backup.ps1 | iex
+  # or manually:  wsl --export ${DISTRO_NAME} C:\\caelicode-backup\\${DISTRO_NAME}.tar
+
+Step 2 — Back up your home directory (from inside WSL):
   mkdir -p /mnt/c/caelicode-backup
-  cp -r ~/  /mnt/c/caelicode-backup/home-backup
+  cp -a "\$HOME" /mnt/c/caelicode-backup/home-backup
 
-Step 2 — Note your current config:
-  cat /etc/caelicode/config.yaml
-  cat ~/.gitconfig
-
-Step 3 — From PowerShell (as Administrator), unregister and re-import:
+Step 3 — Re-install (from PowerShell, as Administrator):
   wsl --shutdown
   wsl --unregister ${DISTRO_NAME}
-  irm https://raw.githubusercontent.com/caelicode/wsl/main/install.ps1 | iex
+  irm https://raw.githubusercontent.com/${REPO}/main/install.ps1 | iex
 
-Step 4 — After re-import, restore your data:
-  cp -r /mnt/c/caelicode-backup/home-backup/.ssh ~/
-  cp -r /mnt/c/caelicode-backup/home-backup/.gitconfig ~/
-  # ... restore other personal files as needed
+Step 4 — Restore your data (from inside the new WSL):
+  cp -a /mnt/c/caelicode-backup/home-backup/.ssh ~/ 2>/dev/null || true
+  cp -a /mnt/c/caelicode-backup/home-backup/.gitconfig ~/ 2>/dev/null || true
+  # ...restore other personal files as needed
 
-Step 5 — Clean up backup:
+Step 5 — When satisfied, clean up (from PowerShell):
   Remove-Item -Recurse -Force C:\\caelicode-backup
 
 EOF
     exit 0
 fi
 
-# ── Check for Updates ────────────────────────────────────────────────
-log "Current version: ${CURRENT_VERSION} (${CURRENT_PROFILE} profile)"
+# ── Fleet policy (optional, admin-provisioned) ───────────────────────
+# /etc/caelicode/policy.yaml lets an organization manage a fleet:
+#   policy:
+#     updates_disabled: true          # central management only
+#     pin_version: v0.11.0            # hold every machine at a release
+#     update_repo: my-org/wsl-fork    # serve releases from a fork
+POLICY_FILE="/etc/caelicode/policy.yaml"
+policy_get() {
+    [ -r "$POLICY_FILE" ] && [ -x "${SELF_DIR}/caelicode-config" ] || return 1
+    CAELICODE_CONFIG="$POLICY_FILE" "${SELF_DIR}/caelicode-config" get "$1" 2>/dev/null
+}
 
-RELEASE_JSON="$(curl -sf "https://api.github.com/repos/${REPO}/releases/latest" || true)"
+POLICY_REPO="$(policy_get policy.update_repo || true)"
+if [ -n "$POLICY_REPO" ]; then
+    if [[ "$POLICY_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+        REPO="$POLICY_REPO"
+        API_BASE="https://api.github.com/repos/${REPO}"
+        log "Fleet policy: releases served from ${REPO}"
+    else
+        warn "Ignoring malformed policy.update_repo: ${POLICY_REPO}"
+    fi
+fi
 
-if [ -z "$RELEASE_JSON" ]; then
-    err "Failed to fetch release info from GitHub"
-    err "Check your internet connection or try again later"
+if [ "$(policy_get policy.updates_disabled || true)" = "true" ]; then
+    if [ "$MODE" = "check" ]; then
+        log "Updates on this machine are managed centrally (policy.updates_disabled)."
+        exit 0
+    fi
+    err "Updates on this machine are managed by your administrator"
+    err "(/etc/caelicode/policy.yaml: policy.updates_disabled)."
     exit 1
 fi
 
-LATEST_VERSION="$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null || echo "")"
-CHANGELOG="$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body',''))" 2>/dev/null || echo "")"
+POLICY_PIN="$(policy_get policy.pin_version || true)"
+if [ -n "$POLICY_PIN" ]; then
+    if [ -n "$TARGET_VERSION" ] && [ "$TARGET_VERSION" != "$POLICY_PIN" ]; then
+        err "Fleet policy pins this machine to ${POLICY_PIN};"
+        err "--version ${TARGET_VERSION} is not allowed."
+        exit 1
+    fi
+    TARGET_VERSION="$POLICY_PIN"
+    log "Fleet policy pins version: ${POLICY_PIN}"
+fi
+
+# ── Release lookup ───────────────────────────────────────────────────
+strip_v() { printf '%s' "${1#v}"; }
+
+# is_newer A B → true when A is strictly newer than B (semver-ish)
+is_newer() {
+    local a b
+    a="$(strip_v "$1")"; b="$(strip_v "$2")"
+    [ "$a" != "$b" ] && [ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | tail -1)" = "$a" ]
+}
+
+is_semver() { [[ "$(strip_v "$1")" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; }
+
+fetch_release_json() {
+    # Populates RELEASE_JSON. Uses a conditional request (ETag) for the
+    # latest-release lookup so the daily scheduled check does not burn
+    # unauthenticated API quota.
+    local url out code etag
+    if [ -n "$TARGET_VERSION" ]; then
+        url="${API_BASE}/releases/tags/${TARGET_VERSION}"
+        out="${TEMP_DIR}/release.json"
+        if ! curl -sfL -o "$out" "$url"; then
+            err "Release '${TARGET_VERSION}' not found (${url})"
+            return 1
+        fi
+        RELEASE_JSON_FILE="$out"
+        return 0
+    fi
+
+    url="${API_BASE}/releases/latest"
+    out="${TEMP_DIR}/release.json"
+    etag=""
+    [ -r "$ETAG_FILE" ] && etag="$(cat "$ETAG_FILE")"
+    local -a cond_headers=()
+    [ -n "$etag" ] && cond_headers=(-H "If-None-Match: ${etag}")
+
+    code="$(curl -sL -o "$out" -D "${TEMP_DIR}/headers" \
+                 ${cond_headers[@]+"${cond_headers[@]}"} \
+                 -w '%{http_code}' "$url" || echo "000")"
+
+    case "$code" in
+        200)
+            RELEASE_JSON_FILE="$out"
+            # Cache the response for 304 replies later (best effort).
+            if [ -w "$STATE_DIR" ] || { [ -n "$SUDO" ] && sudo -n true 2>/dev/null; } || [ "$(id -u)" -eq 0 ]; then
+                grep -i '^etag:' "${TEMP_DIR}/headers" | head -1 | sed 's/^[Ee][Tt][Aa][Gg]:[[:space:]]*//' | tr -d '\r' \
+                    | run_priv tee "$ETAG_FILE" >/dev/null 2>&1 || true
+                run_priv cp "$out" "$RELEASE_CACHE" 2>/dev/null || true
+            fi
+            ;;
+        304)
+            if [ -r "$RELEASE_CACHE" ]; then
+                RELEASE_JSON_FILE="$RELEASE_CACHE"
+            else
+                # Cache lost — retry unconditionally.
+                if curl -sfL -o "$out" "$url"; then
+                    RELEASE_JSON_FILE="$out"
+                else
+                    err "Failed to fetch release info from GitHub"
+                    return 1
+                fi
+            fi
+            ;;
+        *)
+            err "Failed to fetch release info from GitHub (HTTP ${code})"
+            err "Check your internet connection or try again later"
+            return 1
+            ;;
+    esac
+}
+
+# Privileged file write helper that degrades to plain execution as root.
+run_priv() {
+    if [ -z "$SUDO" ]; then "$@"; else sudo -n "$@"; fi
+}
+
+json_field() { jq -r "$1 // empty" "$2" 2>/dev/null; }
+
+asset_url() {
+    jq -r --arg name "$1" '.assets[]? | select(.name == $name) | .browser_download_url' \
+        "$RELEASE_JSON_FILE" 2>/dev/null | head -1
+}
+
+write_state() {
+    # write_state <latest> <available> <requires_reimport> <notes_url>
+    local dir_ok=false
+    if [ -d "$STATE_DIR" ] && { [ -w "$STATE_DIR" ] || [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; }; then
+        dir_ok=true
+    fi
+    $dir_ok || return 0
+    jq -n --arg current "$CURRENT_VERSION" --arg latest "$1" \
+          --argjson available "$2" --argjson reimport "$3" \
+          --arg notes "$4" --arg checked "$(date -Is)" \
+          '{current: $current, latest: $latest, available: $available,
+            requires_reimport: $reimport, notes_url: $notes, checked_at: $checked}' \
+        | run_priv tee "$STATE_FILE" >/dev/null || true
+}
+
+# ── mise helpers ─────────────────────────────────────────────────────
+# mise data lives in root-owned /opt/mise: run it privileged, with its
+# environment passed explicitly (sudo env_reset would otherwise strip
+# MISE_DATA_DIR and silently install into root's home).
+run_mise() {
+    run_priv env MISE_DATA_DIR=/opt/mise MISE_CONFIG_DIR=/opt/mise/config \
+        XDG_DATA_HOME=/opt/mise PATH="/opt/mise/bin:/usr/local/bin:/usr/bin:/bin" \
+        mise "$@"
+}
+
+# The runtime PATH uses direct symlinks in /opt/mise/bin (mise shims hang
+# in WSL). Those symlinks point at version-specific install paths, so they
+# MUST be regenerated after tool versions change or updates never take
+# effect even though `mise install` succeeded.
+regen_tool_symlinks() {
+    local shim tool real
+    for shim in /opt/mise/shims/*; do
+        [ -e "$shim" ] || continue
+        tool="$(basename "$shim")"
+        real="$(run_mise which "$tool" 2>/dev/null || true)"
+        if [ -n "$real" ] && [ -x "$real" ]; then
+            run_priv ln -sf "$real" "/opt/mise/bin/${tool}"
+        fi
+    done
+}
+
+# ── Rollback ─────────────────────────────────────────────────────────
+if [ "$MODE" = "rollback" ]; then
+    require_sudo
+    PREV="$(cat "$PREVIOUS_FILE" 2>/dev/null || true)"
+    if [ -z "$PREV" ] || [ ! -d "${RELEASES_DIR}/${PREV}" ]; then
+        err "No previous release available to roll back to."
+        exit 1
+    fi
+    log "Rolling back: ${CURRENT_VERSION} → ${PREV}"
+    run_priv ln -sfn "releases/${PREV}" "$CURRENT_LINK"
+    printf '%s\n' "$CURRENT_VERSION" | run_priv tee "$PREVIOUS_FILE" >/dev/null
+    printf '%s\n' "$PREV" | run_priv tee "$VERSION_FILE" >/dev/null
+    # Re-sync mise tools to the rolled-back profile pins.
+    PROFILE_TOML="${RELEASES_DIR}/${PREV}/profiles/${CURRENT_PROFILE}.toml"
+    if [ -f "$PROFILE_TOML" ]; then
+        run_priv cp "$PROFILE_TOML" "$MISE_CONFIG"
+        run_mise install || warn "mise install failed — tool versions may not match ${PREV}"
+        run_mise reshim || true
+        regen_tool_symlinks
+    fi
+    log "Rolled back to ${PREV}. Run 'caelicode-update' to move forward again."
+    exit 0
+fi
+
+# ── Check for Updates ────────────────────────────────────────────────
+log "Current version: ${CURRENT_VERSION} (${CURRENT_PROFILE} profile)"
+
+fetch_release_json || exit 1
+
+LATEST_VERSION="$(json_field '.tag_name' "$RELEASE_JSON_FILE")"
+NOTES_URL="$(json_field '.html_url' "$RELEASE_JSON_FILE")"
+CHANGELOG="$(json_field '.body' "$RELEASE_JSON_FILE")"
 
 if [ -z "$LATEST_VERSION" ]; then
     err "Could not determine latest version"
     exit 1
 fi
 
-if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
-    log "Already at latest version: ${CURRENT_VERSION}"
+# Release metadata (manifest is authoritative when present)
+REQUIRES_REIMPORT=false
+MANIFEST_URL="$(asset_url "$MANIFEST_ASSET")"
+PAYLOAD_URL="$(asset_url "$PAYLOAD_ASSET")"
+PAYLOAD_SHA256=""
+if [ -n "$MANIFEST_URL" ]; then
+    if curl -sfL -o "${TEMP_DIR}/manifest.json" "$MANIFEST_URL"; then
+        REQUIRES_REIMPORT="$(jq -r '.requires_reimport // false' "${TEMP_DIR}/manifest.json")"
+        PAYLOAD_SHA256="$(jq -r '.payload_sha256 // empty' "${TEMP_DIR}/manifest.json")"
+    else
+        warn "Could not download release manifest — proceeding without it"
+    fi
+fi
+
+TARGET="${TARGET_VERSION:-$LATEST_VERSION}"
+
+UP_TO_DATE=false
+if [ "$CURRENT_VERSION" = "$TARGET" ]; then
+    UP_TO_DATE=true
+elif [ -z "$TARGET_VERSION" ] && is_semver "$CURRENT_VERSION" && ! is_newer "$TARGET" "$CURRENT_VERSION"; then
+    # Latest release is not newer (e.g. a yanked release re-listed) —
+    # never silently downgrade unless the user pinned a tag explicitly.
+    UP_TO_DATE=true
+fi
+
+# --force in apply mode doubles as a repair: re-apply the current
+# release (re-stage, re-link, re-run mise, regenerate symlinks).
+if [ "$MODE" = "update" ] && $FORCE; then
+    UP_TO_DATE=false
+fi
+
+if [ "$MODE" = "check" ]; then
+    if $UP_TO_DATE; then
+        write_state "$LATEST_VERSION" false "$REQUIRES_REIMPORT" "$NOTES_URL"
+        log "Up to date (${CURRENT_VERSION})"
+        exit 0
+    fi
+    write_state "$LATEST_VERSION" true "$REQUIRES_REIMPORT" "$NOTES_URL"
+    # Opt-in Windows toast (no-op without interop, e.g. from the timer;
+    # runtime-init retries with interop on the next login).
+    if [ -x "${SELF_DIR}/caelicode-notify" ]; then
+        "${SELF_DIR}/caelicode-notify" update-available >/dev/null 2>&1 || true
+    fi
+    if [ "$REQUIRES_REIMPORT" = "true" ]; then
+        log "Update available: ${CURRENT_VERSION} → ${LATEST_VERSION} (requires full re-import — run: caelicode-update --full)"
+        exit 20
+    fi
+    log "Update available: ${CURRENT_VERSION} → ${LATEST_VERSION} (run: caelicode-update)"
+    exit 10
+fi
+
+if $UP_TO_DATE; then
+    log "Already at ${CURRENT_VERSION} — nothing to do."
+    write_state "$LATEST_VERSION" false "$REQUIRES_REIMPORT" "$NOTES_URL"
     exit 0
 fi
 
-log "Update available: ${CURRENT_VERSION} → ${LATEST_VERSION}"
+if ! is_semver "$CURRENT_VERSION" && [ -z "$TARGET_VERSION" ]; then
+    warn "Installed version '${CURRENT_VERSION}' is not a release build;"
+    warn "updating in place to ${TARGET}. Locally built images may differ"
+    warn "from release images at the apt-package level."
+fi
 
-if [ -n "$CHANGELOG" ]; then
+log "Update target: ${CURRENT_VERSION} → ${TARGET}"
+
+if [ -n "$CHANGELOG" ] && ! $QUIET; then
     echo ""
     echo "Changelog:"
     echo "──────────"
-    echo "$CHANGELOG" | head -30
+    printf '%s\n' "$CHANGELOG" | head -30
     echo ""
 fi
 
-if $DRY_RUN; then
-    log "[DRY RUN] Would update from ${CURRENT_VERSION} to ${LATEST_VERSION}"
-    log "[DRY RUN] Would download source archive and update:"
-    log "[DRY RUN]   - /opt/caelicode/scripts/"
-    log "[DRY RUN]   - /opt/caelicode/profiles/"
-    log "[DRY RUN]   - /opt/caelicode/themes/"
-    log "[DRY RUN]   - /etc/caelicode/starship.toml"
-    log "[DRY RUN]   - /etc/skel/.bashrc, .bash_aliases, .zshrc"
-    log "[DRY RUN]   - mise tool versions"
+if [ "$REQUIRES_REIMPORT" = "true" ] && ! $FORCE; then
+    err "Release ${TARGET} includes OS-level changes and requires a full re-import."
+    err "Run 'caelicode-update --full' for the guide, or re-run with --force to"
+    err "apply the in-place parts anyway (scripts/configs only)."
+    exit 20
+fi
+
+if [ "$MODE" = "dry-run" ]; then
+    log "[DRY RUN] Would stage ${TARGET} into ${RELEASES_DIR}/${TARGET}"
+    if [ -n "$PAYLOAD_URL" ]; then
+        log "[DRY RUN] Payload: ${PAYLOAD_ASSET} (sha256-verified)"
+    else
+        log "[DRY RUN] Payload: source archive fallback (NO checksum — legacy release)"
+    fi
+    log "[DRY RUN] Would then update:"
+    log "[DRY RUN]   - /opt/caelicode/current → releases/${TARGET} (atomic flip)"
+    log "[DRY RUN]   - /usr/local/bin command symlinks"
+    log "[DRY RUN]   - /etc/skel shell templates"
+    log "[DRY RUN]   - /etc/caelicode/starship.toml (only if unmodified/theme-tracked)"
+    log "[DRY RUN]   - systemd update-check units"
+    log "[DRY RUN]   - mise tools per profiles/${CURRENT_PROFILE}.toml + /opt/mise/bin symlinks"
+    log "[DRY RUN] Rollback would restore: ${CURRENT_VERSION}"
     exit 0
 fi
 
-# ── Download Source Archive ──────────────────────────────────────────
-ARCHIVE_URL="https://github.com/${REPO}/archive/refs/tags/${LATEST_VERSION}.tar.gz"
+# ── Download & Verify ────────────────────────────────────────────────
+require_sudo
 
-log "Downloading source archive..."
+PAYLOAD_ROOT=""
 cd "$TEMP_DIR"
 
-if ! curl -sfL -o "source.tar.gz" "$ARCHIVE_URL"; then
-    err "Failed to download source archive"
-    err "URL: ${ARCHIVE_URL}"
-    exit 1
-fi
-
-tar xzf source.tar.gz
-# GitHub extracts to: wsl-<version-without-v>/ e.g. wsl-0.4.0/
-EXTRACT_DIR="$(find . -maxdepth 1 -type d -name 'wsl-*' -print -quit)/"
-
-if [ -z "$EXTRACT_DIR" ] || [ "$EXTRACT_DIR" = "/" ] || [ ! -d "$EXTRACT_DIR" ]; then
-    err "Could not find extracted source directory"
-    exit 1
-fi
-
-log "Extracted to ${EXTRACT_DIR}"
-
-# ── Apply Updates ────────────────────────────────────────────────────
-
-# 1. Scripts
-if [ -d "${EXTRACT_DIR}scripts" ]; then
-    log "Updating scripts..."
-    sudo cp -r "${EXTRACT_DIR}scripts/"* "${INSTALL_DIR}/scripts/"
-    sudo find "${INSTALL_DIR}/scripts" -name "*.sh" -exec chmod +x {} +
-    sudo chmod +x "${INSTALL_DIR}/scripts/caelicode-update"
-    # Ensure all executable scripts are symlinked into PATH
-    sudo ln -sf "${INSTALL_DIR}/scripts/caelicode-update" /usr/local/bin/caelicode-update
-    sudo ln -sf "${INSTALL_DIR}/scripts/health-check.sh" /usr/local/bin/caelicode-health
-    if [ -f "${INSTALL_DIR}/scripts/code" ]; then
-        sudo chmod +x "${INSTALL_DIR}/scripts/code"
-        sudo ln -sf "${INSTALL_DIR}/scripts/code" /usr/local/bin/code
+if [ -n "$PAYLOAD_URL" ]; then
+    log "Downloading update payload..."
+    if ! curl -sfL -o payload.tar.gz "$PAYLOAD_URL"; then
+        err "Failed to download ${PAYLOAD_ASSET}"
+        exit 1
     fi
-    if [ -f "${INSTALL_DIR}/scripts/caelicode-theme" ]; then
-        sudo chmod +x "${INSTALL_DIR}/scripts/caelicode-theme"
-        sudo ln -sf "${INSTALL_DIR}/scripts/caelicode-theme" /usr/local/bin/caelicode-theme
+    if [ -n "$PAYLOAD_SHA256" ]; then
+        echo "${PAYLOAD_SHA256}  payload.tar.gz" | sha256sum -c --quiet - || {
+            err "Checksum verification FAILED for ${PAYLOAD_ASSET}."
+            err "Refusing to apply. Try again, and if this persists report it:"
+            err "  https://github.com/${REPO}/issues"
+            exit 1
+        }
+        log "Payload checksum verified"
+    else
+        warn "Manifest carries no payload checksum — applying unverified payload"
     fi
-    log "  ✓ Scripts updated"
-fi
-
-# 2. Profiles (tool version manifests)
-if [ -d "${EXTRACT_DIR}profiles" ]; then
-    log "Updating profiles..."
-    sudo cp -r "${EXTRACT_DIR}profiles/"* "${INSTALL_DIR}/profiles/"
-    log "  ✓ Profiles updated"
-fi
-
-# 3. Starship themes
-if [ -d "${EXTRACT_DIR}config/themes" ]; then
-    log "Updating starship themes..."
-    sudo mkdir -p "${INSTALL_DIR}/themes"
-    sudo cp -r "${EXTRACT_DIR}config/themes/"* "${INSTALL_DIR}/themes/"
-    log "  ✓ Starship themes updated"
-fi
-
-# 3b. Starship active config (only update if user hasn't switched themes)
-if [ -f "${EXTRACT_DIR}config/starship.toml" ]; then
-    log "Updating starship config..."
-    # Always update the default theme file in the themes dir
-    sudo cp "${EXTRACT_DIR}config/starship.toml" "${INSTALL_DIR}/themes/default.toml"
-    # Only overwrite the active config if it matches the default theme
-    # (i.e. user hasn't switched to a different theme)
-    if [ -f "${INSTALL_DIR}/themes/default.toml" ]; then
-        ACTIVE_HASH="$(md5sum "${ETC_DIR}/starship.toml" 2>/dev/null | cut -d' ' -f1 || echo "")"
-        # Check if current config matches ANY older version of default
-        # If user customised it, we don't overwrite
-        DEFAULT_HASH="$(md5sum "${INSTALL_DIR}/themes/default.toml" | cut -d' ' -f1)"
-        if [ "$ACTIVE_HASH" = "$DEFAULT_HASH" ] || [ ! -f "${ETC_DIR}/starship.toml" ]; then
-            sudo cp "${EXTRACT_DIR}config/starship.toml" "${ETC_DIR}/starship.toml"
-        fi
+    mkdir -p payload && tar xzf payload.tar.gz -C payload
+    PAYLOAD_ROOT="${TEMP_DIR}/payload"
+else
+    # Legacy fallback: releases published before the manifest/payload era.
+    warn "This release has no update payload asset; falling back to the"
+    warn "source archive (no checksum available for source archives)."
+    ARCHIVE_URL="https://github.com/${REPO}/archive/refs/tags/${TARGET}.tar.gz"
+    if ! curl -sfL -o source.tar.gz "$ARCHIVE_URL"; then
+        err "Failed to download source archive: ${ARCHIVE_URL}"
+        exit 1
     fi
-    log "  ✓ Starship config updated"
+    tar xzf source.tar.gz
+    SRC_DIR="$(find . -maxdepth 1 -type d -name 'wsl-*' -print -quit)"
+    if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
+        err "Could not find extracted source directory"
+        exit 1
+    fi
+    # Normalize the source tree into the payload layout.
+    mkdir -p payload/skel payload/themes payload/systemd
+    cp -a "${SRC_DIR}/scripts"  payload/scripts
+    cp -a "${SRC_DIR}/profiles" payload/profiles
+    [ -d "${SRC_DIR}/config/themes" ] && cp -a "${SRC_DIR}/config/themes/." payload/themes/
+    [ -f "${SRC_DIR}/config/starship.toml" ] && cp "${SRC_DIR}/config/starship.toml" payload/themes/default.toml
+    for f in .bashrc .bash_aliases .zshrc; do
+        [ -f "${SRC_DIR}/config/${f}" ] && cp "${SRC_DIR}/config/${f}" "payload/skel/${f}"
+    done
+    [ -d "${SRC_DIR}/config/systemd" ] && cp -a "${SRC_DIR}/config/systemd/." payload/systemd/
+    PAYLOAD_ROOT="${TEMP_DIR}/payload"
 fi
 
-# 4. Shell templates (for new users — existing users keep theirs)
-if [ -d "${EXTRACT_DIR}config" ]; then
+for required in scripts profiles themes; do
+    if [ ! -d "${PAYLOAD_ROOT}/${required}" ]; then
+        err "Update payload is missing '${required}/' — refusing to apply"
+        exit 1
+    fi
+done
+
+# Capture where the CURRENTLY ACTIVE themes live BEFORE staging: the
+# legacy-layout bootstrap below repoints `current` at the new release,
+# and the starship step needs the OLD theme hashes to tell stock/theme
+# users apart from customized ones.
+OLD_THEMES_DIR=""
+if [ -L "$CURRENT_LINK" ] && [ -d "${CURRENT_LINK}/themes" ]; then
+    OLD_THEMES_DIR="$(readlink -f "$CURRENT_LINK")/themes"
+elif [ -d "${BASE_DIR}/themes" ]; then
+    OLD_THEMES_DIR="${BASE_DIR}/themes"   # legacy flat layout
+fi
+
+# ── Stage Release ────────────────────────────────────────────────────
+log "Staging release ${TARGET}..."
+STAGING="${RELEASES_DIR}/.staging-${TARGET}"
+run_priv rm -rf "$STAGING" "${RELEASES_DIR}/${TARGET}"
+run_priv mkdir -p "$RELEASES_DIR" "$STATE_DIR"
+# --no-preserve=ownership: the payload was extracted by the invoking
+# user; without this, root-executed code (including the daily
+# update-check unit's ExecStart) would be owned by uid 1000.
+run_priv cp -a --no-preserve=ownership "$PAYLOAD_ROOT" "$STAGING"
+run_priv find "$STAGING/scripts" -type f -name "*.sh" -exec chmod +x {} +
+for tool in caelicode-update caelicode-theme caelicode-config caelicode-runtime-init code; do
+    [ -f "${STAGING}/scripts/${tool}" ] && run_priv chmod +x "${STAGING}/scripts/${tool}"
+done
+run_priv mv "$STAGING" "${RELEASES_DIR}/${TARGET}"
+
+# Legacy flat-layout images have no `current` symlink yet. Bootstrap it
+# to the freshly staged release NOW, before the /usr/local/bin links
+# below start routing through it — otherwise every caelicode command
+# (including this one) dangles for the whole apply phase, and a
+# mid-apply failure would leave the system with no working updater.
+if [ ! -L "$CURRENT_LINK" ]; then
+    log "Legacy layout detected — bootstrapping ${CURRENT_LINK}"
+    run_priv ln -sfn "releases/${TARGET}" "$CURRENT_LINK"
+fi
+
+# ── Apply (per-component; the flip below is the atomic activation) ──
+
+# 1. Command symlinks route through /opt/caelicode/current so they stay
+#    valid across flips; (re)create them, replacing legacy flat-path links.
+log "Refreshing command symlinks..."
+link_cmd() { run_priv ln -sf "${CURRENT_LINK}/scripts/$1" "/usr/local/bin/$2"; }
+link_cmd caelicode-update  caelicode-update
+link_cmd health-check.sh   caelicode-health
+link_cmd caelicode-theme   caelicode-theme
+link_cmd caelicode-config  caelicode-config
+link_cmd caelicode-profile caelicode-profile
+link_cmd code              code
+
+# 2. Shell templates for new users (existing homes are never touched)
+if [ -d "${PAYLOAD_ROOT}/skel" ]; then
     log "Updating shell templates in /etc/skel..."
     for f in .bashrc .bash_aliases .zshrc; do
-        if [ -f "${EXTRACT_DIR}config/${f}" ]; then
-            sudo cp "${EXTRACT_DIR}config/${f}" "${SKEL_DIR}/${f}"
-        fi
+        [ -f "${PAYLOAD_ROOT}/skel/${f}" ] && run_priv cp "${PAYLOAD_ROOT}/skel/${f}" "${SKEL_DIR}/${f}"
     done
-    log "  ✓ Shell templates updated"
 fi
 
-# 5. Update active mise profile and install new tool versions
-log "Updating tool versions via mise..."
-PROFILE_TOML="${INSTALL_DIR}/profiles/${CURRENT_PROFILE}.toml"
+# 3. Starship config. OLD_THEMES_DIR was captured before staging, so
+#    the OLD theme hashes tell us apart:
+#      - stock users (active == old default)        → give them the new default
+#      - theme users (active == an old theme file)  → give them the new same theme
+#      - customized users                            → never touch
+ACTIVE_CONF="${ETC_DIR}/starship.toml"
+NEW_THEMES_DIR="${RELEASES_DIR}/${TARGET}/themes"
+if [ -d "$NEW_THEMES_DIR" ]; then
+    if [ ! -f "$ACTIVE_CONF" ]; then
+        log "Installing default starship config..."
+        run_priv cp "${NEW_THEMES_DIR}/default.toml" "$ACTIVE_CONF"
+    elif [ -n "$OLD_THEMES_DIR" ] && [ -d "$OLD_THEMES_DIR" ]; then
+        ACTIVE_HASH="$(md5sum "$ACTIVE_CONF" | cut -d' ' -f1)"
+        MATCHED_THEME=""
+        for old_theme in "$OLD_THEMES_DIR"/*.toml; do
+            [ -f "$old_theme" ] || continue
+            if [ "$(md5sum "$old_theme" | cut -d' ' -f1)" = "$ACTIVE_HASH" ]; then
+                MATCHED_THEME="$(basename "$old_theme")"
+                break
+            fi
+        done
+        if [ -n "$MATCHED_THEME" ] && [ -f "${NEW_THEMES_DIR}/${MATCHED_THEME}" ]; then
+            log "Updating starship config (theme: ${MATCHED_THEME%.toml})..."
+            run_priv cp "${NEW_THEMES_DIR}/${MATCHED_THEME}" "$ACTIVE_CONF"
+        else
+            log "Starship config is customized — leaving it untouched"
+        fi
+    fi
+fi
 
+# 4. systemd units (update-check timer)
+if [ -d "${PAYLOAD_ROOT}/systemd" ]; then
+    log "Updating systemd units..."
+    run_priv cp -a --no-preserve=ownership "${PAYLOAD_ROOT}/systemd/." /etc/systemd/system/
+    run_priv mkdir -p /etc/systemd/system/timers.target.wants
+    run_priv ln -sf /etc/systemd/system/caelicode-update-check.timer \
+        /etc/systemd/system/timers.target.wants/caelicode-update-check.timer
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        run_priv systemctl daemon-reload || true
+        run_priv systemctl restart caelicode-update-check.timer 2>/dev/null || true
+    fi
+fi
+
+# 4b. Legacy images: enable systemd for the update-check timer.
+if ! grep -q '^\[boot\]' /etc/wsl.conf 2>/dev/null; then
+    log "Enabling systemd in /etc/wsl.conf (takes effect after 'wsl --shutdown')..."
+    printf '\n[boot]\nsystemd = true\n' | run_priv tee -a /etc/wsl.conf >/dev/null
+fi
+
+# 5. Tools: sync the profile pins, install, and regenerate the
+#    /opt/mise/bin symlinks that the runtime PATH actually uses.
+MISE_OK=true
+PROFILE_TOML="${RELEASES_DIR}/${TARGET}/profiles/${CURRENT_PROFILE}.toml"
 if [ -f "$PROFILE_TOML" ]; then
-    sudo cp "$PROFILE_TOML" "$MISE_CONFIG"
-    mise install --env "$MISE_CONFIG" 2>&1 | tail -20
-    mise reshim
-    log "  ✓ Tool versions updated"
+    log "Updating tool versions via mise (this can take a few minutes)..."
+    # Team profile layers (caelicode-profile) are re-merged over the
+    # NEW release's base profile so updates never drop layered tools.
+    if compgen -G "/etc/caelicode/profiles.d/*.toml" >/dev/null 2>&1 \
+        && [ -x "${RELEASES_DIR}/${TARGET}/scripts/caelicode-profile" ]; then
+        log "Re-merging team profile layers..."
+        "${RELEASES_DIR}/${TARGET}/scripts/caelicode-profile" merge --base "$PROFILE_TOML" \
+            || run_priv cp "$PROFILE_TOML" "$MISE_CONFIG"
+    else
+        run_priv cp "$PROFILE_TOML" "$MISE_CONFIG"
+    fi
+    if run_mise install 2>&1 | tail -20; then
+        run_mise reshim || true
+        regen_tool_symlinks
+        log "  ✓ Tool versions updated"
+    else
+        MISE_OK=false
+    fi
 else
     warn "Profile TOML not found: ${PROFILE_TOML} — skipping tool update"
 fi
 
-# 6. Update version marker
-echo "$LATEST_VERSION" | sudo tee "$VERSION_FILE" > /dev/null
+# ── Activate ─────────────────────────────────────────────────────────
+# The scripts/configs are good either way, so `current` flips in both
+# cases — but the VERSION marker only advances when the tool sync
+# succeeded. Leaving it behind is what makes "re-run to retry" true:
+# a re-run sees an un-finished version and goes again, instead of
+# exiting "already up to date" over a half-synced toolchain.
+run_priv ln -sfn "releases/${TARGET}" "$CURRENT_LINK"
+printf '%s\n' "$CURRENT_VERSION" | run_priv tee "$PREVIOUS_FILE" >/dev/null
+
+if ! $MISE_OK; then
+    echo ""
+    err "Tool sync (mise install) failed — scripts and configs are updated,"
+    err "but tool versions are not, and the version marker was left at"
+    err "${CURRENT_VERSION} so the update stays pending."
+    err "  Retry:    caelicode-update"
+    err "  Go back:  caelicode-update --rollback"
+    exit 1
+fi
+
+printf '%s\n' "$TARGET" | run_priv tee "$VERSION_FILE" >/dev/null
+write_state "$LATEST_VERSION" false "$REQUIRES_REIMPORT" "$NOTES_URL"
+
+# ── Prune (keep current + previous for rollback) ─────────────────────
+run_priv rm -rf "${RELEASES_DIR}/.staging-"* 2>/dev/null || true
+KEEP_A="$TARGET"
+KEEP_B="$(cat "$PREVIOUS_FILE" 2>/dev/null || true)"
+for dir in "$RELEASES_DIR"/*/; do
+    [ -d "$dir" ] || continue
+    name="$(basename "$dir")"
+    if [ "$name" != "$KEEP_A" ] && [ "$name" != "$KEEP_B" ]; then
+        run_priv rm -rf "$dir"
+    fi
+done
 
 echo ""
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-log "Updated: ${CURRENT_VERSION} → ${LATEST_VERSION}"
+log "Updated: ${CURRENT_VERSION} → ${TARGET}"
+log "Rollback available: caelicode-update --rollback"
 log "Restart your shell or run: exec \$SHELL"
-log ""
-log "Note: If the update included new apt packages or OS-level"
-log "changes, run 'caelicode-update --full' for a re-import guide."
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 }
 
 # Call main with all arguments — the function wrapper ensures bash reads
-# the entire script into memory before executing, preventing breakage
-# when the script overwrites itself during the update.
+# the entire script into memory before executing, so self-update and
+# release pruning can never yank the file out from under the interpreter.
 main "$@"

@@ -3,10 +3,13 @@
 # If not running interactively, don't do anything
 [[ -o interactive ]] || return
 
-# ── Start in home directory ──────────────────────────────────────
-# WSL inherits the Windows CWD (e.g. /mnt/c/Windows/System32) which
-# causes tools to scan slowly over the 9P mount.
-[[ "$PWD" == /mnt/* ]] && cd ~
+# ── Start in home directory (Windows system dirs only) ──────────────
+# WSL launched from the Start menu inherits the Windows CWD
+# (C:\Windows\System32), where prompt tools scan slowly over the 9P
+# mount. Only bounce home from Windows *system* directories — never
+# from project paths, so `wsl --cd`, VS Code terminals opened on /mnt
+# workspaces, and tmux splits keep their working directory.
+[[ "$PWD" == /mnt/c/[Ww][Ii][Nn][Dd][Oo][Ww][Ss]* ]] && cd ~
 
 # ── PATH ─────────────────────────────────────────────────────────
 # Clean Linux-only PATH. NO mise shims — all tools are symlinked
@@ -72,16 +75,22 @@ export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 export NODE_OPTIONS=--use-openssl-ca
 
-# ── CaeliCode MOTD ──────────────────────────────────────────────
-if [ -z "$CAELICODE_MOTD_SHOWN" ]; then
-    export CAELICODE_MOTD_SHOWN=1
-    PROFILE=$(cat /opt/caelicode/PROFILE 2>/dev/null || echo "base")
-    VERSION=$(cat /opt/caelicode/VERSION 2>/dev/null || echo "dev")
-
-    echo ""
-    echo -e "\033[1;36m  ╔═══════════════════════════════════════════╗\033[0m"
-    echo -e "\033[1;36m  ║\033[0m  \033[1;37mCaeliCode WSL\033[0m"
-    echo -e "\033[1;36m  ║\033[0m  \033[0;37mProfile: ${PROFILE} │ Version: ${VERSION}\033[0m"
-    echo -e "\033[1;36m  ╚═══════════════════════════════════════════╝\033[0m"
-    echo ""
+# ── SSH agent bridge socket ─────────────────────────────────────
+# Liveness-probe the socket (not just -S): in the /tmp fallback a
+# dead socket file survives WSL reboots, and exporting it breaks
+# ssh in every shell until it is cleaned up.
+if [ -z "${SSH_AUTH_SOCK:-}" ] && command -v socat >/dev/null 2>&1; then
+    for _cc_sock in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/caelicode-ssh-agent.sock" /tmp/caelicode-ssh-agent.sock; do
+        if [ -S "$_cc_sock" ] && socat -u OPEN:/dev/null "UNIX-CONNECT:$_cc_sock" 2>/dev/null; then
+            export SSH_AUTH_SOCK="$_cc_sock"; break
+        fi
+    done
+    unset _cc_sock
 fi
+
+# ── CaeliCode MOTD, update notice & runtime init ────────────────
+# (falls back to the legacy flat layout for pre-releases-era images)
+for _cc_motd in /opt/caelicode/current/scripts/caelicode-motd.sh /opt/caelicode/scripts/caelicode-motd.sh; do
+    if [ -r "$_cc_motd" ]; then source "$_cc_motd"; break; fi
+done
+unset _cc_motd

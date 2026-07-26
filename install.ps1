@@ -14,6 +14,8 @@
     # Direct with parameters:
     .\install.ps1 -Profile sre
     .\install.ps1 -Profile dev -InstallDir D:\wsl\caelicode -Force
+    .\install.ps1 -Profile sre -Version v0.10.2       # pin a release
+    .\install.ps1 -Profile sre -Upgrade               # backup + reinstall
 #>
 
 # ── Wrap in scriptblock for irm | iex safety ─────────────────────────
@@ -29,8 +31,10 @@
 $CaeliProfile  = $null
 $InstallDir    = $null
 $DistroName    = $null
+$PinVersion    = $null
 $SkipWslCheck  = $false
 $Force         = $false
+$Upgrade       = $false
 
 # Pick up args if run as a script (not piped)
 for ($i = 0; $i -lt $args.Count; $i++) {
@@ -38,13 +42,28 @@ for ($i = 0; $i -lt $args.Count; $i++) {
         '-Profile'      { $CaeliProfile = $args[++$i] }
         '-InstallDir'   { $InstallDir   = $args[++$i] }
         '-DistroName'   { $DistroName   = $args[++$i] }
+        '-Version'      { $PinVersion   = $args[++$i] }
         '-SkipWslCheck' { $SkipWslCheck = $true }
         '-Force'        { $Force        = $true }
+        '-Upgrade'      { $Upgrade      = $true }
     }
 }
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'  # Speeds up Invoke-WebRequest
+
+# wsl.exe emits UTF-16LE when its output is captured, which turns every
+# string comparison on its output into NUL-interleaved garbage. WSL_UTF8
+# switches it to UTF-8 (WSL 0.64+); without this, the existing-distro
+# and WSL-version checks below can never match.
+$env:WSL_UTF8 = '1'
+
+# Windows PowerShell 5.1 may negotiate TLS below 1.2 on older systems;
+# GitHub requires TLS 1.2+.
+if ($PSVersionTable.PSVersion.Major -le 5) {
+    [Net.ServicePointManager]::SecurityProtocol = `
+        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+}
 
 # ── Constants ───────────────────────────────────────────────────────
 $RepoOwner = 'caelicode'
@@ -88,6 +107,18 @@ function Write-Banner {
     Write-Host ""
 }
 
+function Invoke-Native {
+    # Runs a native command with $ErrorActionPreference relaxed.
+    # On Windows PowerShell 5.1, 2>&1 on a native command wraps stderr
+    # lines in NativeCommandError records that ARE subject to
+    # $ErrorActionPreference='Stop' — the first stderr line would kill
+    # the script before our own $LASTEXITCODE guards can run.
+    param([scriptblock]$Block)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Block } finally { $ErrorActionPreference = $prev }
+}
+
 # ── 1. Banner ───────────────────────────────────────────────────────
 Write-Banner
 
@@ -101,6 +132,19 @@ if (-not $isAdmin) {
     Write-Host "    Right-click PowerShell and select 'Run as Administrator'," -ForegroundColor Yellow
     Write-Host "    then re-run the install command." -ForegroundColor Yellow
     return
+}
+
+# ── 2b. Detect CPU architecture ─────────────────────────────────────
+# ARM64 machines get the -arm64 image assets (preview). Check the OS
+# architecture, not the process: an x64-emulated PowerShell on ARM64
+# reports PROCESSOR_ARCHITECTURE=AMD64.
+$osArch = $env:PROCESSOR_ARCHITEW6432
+if (-not $osArch) { $osArch = $env:PROCESSOR_ARCHITECTURE }
+try { $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() } catch {}
+$ArchSuffix = ''
+if ($osArch -match '^(ARM64|Arm64)$') {
+    $ArchSuffix = '-arm64'
+    Write-Host "  ! ARM64 Windows detected — using arm64 image assets (preview)" -ForegroundColor Yellow
 }
 
 # ── 3. Check WSL prerequisites ──────────────────────────────────────
@@ -121,7 +165,7 @@ if (-not $SkipWslCheck) {
 
     # Check WSL version (need WSL2)
     try {
-        $wslStatus = wsl.exe --status 2>&1 | Out-String
+        $wslStatus = Invoke-Native { wsl.exe --status 2>&1 | Out-String }
         if ($wslStatus -match 'Default Version:\s*1') {
             Write-Fail "WSL default version is 1. CaeliCode requires WSL2."
             Write-Host ""
@@ -154,8 +198,23 @@ if (-not $CaeliProfile) {
     }
 
     Write-Host ""
+    $attempts = 0
     do {
-        $choice = Read-Host "    Enter choice (1-4)"
+        if ($attempts -ge 5) {
+            Write-Fail "No valid selection after 5 attempts."
+            Write-Host "    For scripted installs pass the profile directly:" -ForegroundColor Yellow
+            Write-Host "      .\install.ps1 -Profile sre" -ForegroundColor White
+            return
+        }
+        try {
+            $choice = Read-Host "    Enter choice (1-4)"
+        } catch {
+            # Non-interactive host (CI, -NonInteractive): Read-Host throws.
+            Write-Fail "Interactive input is unavailable in this session."
+            Write-Host "    Pass the profile directly:  .\install.ps1 -Profile sre" -ForegroundColor Yellow
+            return
+        }
+        $attempts++
     } while ($choice -notmatch '^[1-4]$')
 
     $CaeliProfile = $ValidProfiles[[int]$choice - 1]
@@ -176,54 +235,101 @@ Write-Step "Install directory: $InstallDir"
 Write-Step "Distro name: $DistroName"
 
 # ── 6. Check for existing distro ────────────────────────────────────
-$existingDistros = wsl.exe --list --quiet 2>&1 | Out-String
-if ($existingDistros -match [regex]::Escape($DistroName)) {
-    if ($Force) {
-        Write-Step "Removing existing distro '$DistroName'..."
-        wsl.exe --unregister $DistroName 2>&1 | Out-Null
-        Write-Success "Removed existing distro"
+# Exact per-line match (not substring): 'caelicode-base' must not match
+# a distro named 'caelicode-base-old'. Requires WSL_UTF8=1 (set above).
+# NOTE: the existing distro is NOT removed here — removal is deferred
+# to just before the import, after the new release has been fetched,
+# downloaded, and checksum-verified. A failure anywhere in between
+# leaves the current install untouched.
+$UpgradeBackupPath = $null
+$RemoveExisting = $false
+$existingList = (Invoke-Native { wsl.exe --list --quiet 2>&1 | Out-String }) -split "`r?`n" |
+    ForEach-Object { $_.Trim() } | Where-Object { $_ }
+if ($existingList -contains $DistroName) {
+    if ($Upgrade) {
+        Write-Step "Upgrade requested — backing up '$DistroName' first..."
+        $backupDir = Join-Path $env:USERPROFILE 'caelicode-backups'
+        if (-not (Test-Path $backupDir)) { New-Item -ItemType Directory -Path $backupDir -Force | Out-Null }
+        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $UpgradeBackupPath = Join-Path $backupDir "$DistroName-$stamp.tar"
+        Invoke-Native { wsl.exe --terminate $DistroName 2>&1 | Out-Null }
+        Invoke-Native { wsl.exe --export $DistroName $UpgradeBackupPath 2>&1 | Out-Null }
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $UpgradeBackupPath) -or (Get-Item $UpgradeBackupPath).Length -lt 1MB) {
+            Write-Fail "Backup export failed — NOT removing the existing distro."
+            Write-Host "    Export manually and retry:  wsl --export $DistroName <path>.tar" -ForegroundColor Yellow
+            return
+        }
+        $backupGB = [math]::Round((Get-Item $UpgradeBackupPath).Length / 1GB, 2)
+        Write-Success "Backup saved: $UpgradeBackupPath (${backupGB}GB)"
+        $RemoveExisting = $true
+    } elseif ($Force) {
+        Write-Step "'$DistroName' will be replaced after the new release is verified."
+        $RemoveExisting = $true
     } else {
         Write-Fail "Distro '$DistroName' already exists."
         Write-Host ""
-        Write-Host "    To reinstall, first unregister the existing distro:" -ForegroundColor Yellow
-        Write-Host "      wsl --unregister $DistroName" -ForegroundColor White
-        Write-Host "    Then re-run this installer." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "    To update in-place instead:" -ForegroundColor Yellow
+        Write-Host "    To update in-place (keeps all your data):" -ForegroundColor Yellow
         Write-Host "      wsl -d $DistroName -- caelicode-update" -ForegroundColor White
+        Write-Host ""
+        Write-Host "    To reinstall with an automatic backup first:" -ForegroundColor Yellow
+        Write-Host "      .\install.ps1 -Profile $CaeliProfile -Upgrade" -ForegroundColor White
+        Write-Host ""
+        Write-Host "    To overwrite WITHOUT a backup:" -ForegroundColor Yellow
+        Write-Host "      .\install.ps1 -Profile $CaeliProfile -Force" -ForegroundColor White
         return
     }
 }
 
-# ── 7. Fetch latest release info ────────────────────────────────────
-Write-Step "Fetching latest release from GitHub..."
+# ── 7. Fetch release info ───────────────────────────────────────────
+if ($PinVersion) {
+    Write-Step "Fetching release $PinVersion from GitHub..."
+    $releaseUri = "$ApiBase/releases/tags/$PinVersion"
+} else {
+    Write-Step "Fetching latest release from GitHub..."
+    $releaseUri = "$ApiBase/releases/latest"
+}
 
 try {
-    $releaseInfo = Invoke-RestMethod -Uri "$ApiBase/releases/latest" -Headers @{
+    $releaseInfo = Invoke-RestMethod -Uri $releaseUri -Headers @{
         'Accept' = 'application/vnd.github+json'
         'User-Agent' = 'CaeliCode-WSL-Installer'
     }
 } catch {
     Write-Fail "Failed to fetch release info: $_"
+    if ($PinVersion) {
+        Write-Host "    Check the tag name against: https://github.com/$RepoOwner/$RepoName/releases" -ForegroundColor Yellow
+    }
     return
 }
 
 $version = $releaseInfo.tag_name
-Write-Success "Latest release: $version"
+Write-Success "Release: $version"
 
-# Find the tar.gz and sha256 assets
-$tarAsset = $releaseInfo.assets | Where-Object { $_.name -eq "caelicode-wsl-$CaeliProfile.tar.gz" }
-$shaAsset = $releaseInfo.assets | Where-Object { $_.name -eq "caelicode-wsl-$CaeliProfile.sha256" }
+# Find the tar.gz and sha256 assets (arch-suffixed on ARM64)
+$assetBase = "caelicode-wsl-$CaeliProfile$ArchSuffix"
+$tarAsset = $releaseInfo.assets | Where-Object { $_.name -eq "$assetBase.tar.gz" }
+$shaAsset = $releaseInfo.assets | Where-Object { $_.name -eq "$assetBase.sha256" }
 
-if (-not $tarAsset) {
-    Write-Fail "Profile '$CaeliProfile' not found in release $version."
+if (-not $tarAsset -or -not $shaAsset) {
+    if (-not $tarAsset) {
+        Write-Fail "Asset '$assetBase.tar.gz' not found in release $version."
+        if ($ArchSuffix) {
+            Write-Host "    ARM64 images are a preview: this release may predate them, or its" -ForegroundColor Yellow
+            Write-Host "    arm64 build failed. Watch: https://github.com/$RepoOwner/$RepoName/releases" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Fail "Checksum asset for '$assetBase' is missing from release $version — cannot verify a download."
+    }
     Write-Host "    Available assets:" -ForegroundColor Yellow
     $releaseInfo.assets | ForEach-Object { Write-Host "      - $($_.name)" -ForegroundColor DarkGray }
+    Write-Host ""
+    Write-Host "    The release may still be publishing — retry in a few minutes," -ForegroundColor Yellow
+    Write-Host "    or pin the previous release:  .\install.ps1 -Profile $CaeliProfile -Version <tag>" -ForegroundColor Yellow
     return
 }
 
 $tarSizeMB = [math]::Round($tarAsset.size / 1MB, 1)
-Write-Step "Downloading caelicode-wsl-$CaeliProfile.tar.gz (${tarSizeMB}MB)..."
+Write-Step "Downloading $($tarAsset.name) (${tarSizeMB}MB)..."
 
 # ── 8. Download to temp ─────────────────────────────────────────────
 $tempDir = Join-Path $env:TEMP "caelicode-wsl-install"
@@ -233,39 +339,52 @@ New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 $tarPath = Join-Path $tempDir $tarAsset.name
 $shaPath = Join-Path $tempDir $shaAsset.name
 
-# Download with progress
+# Download with progress. NOTE: WebClient only raises progress events
+# for its *Async methods — the synchronous DownloadFile() never fires
+# them. Use the task-based download and poll the file size instead.
 $webClient = New-Object System.Net.WebClient
 $webClient.Headers.Add('User-Agent', 'CaeliCode-WSL-Installer')
 
-# Simple progress via events
-$downloadComplete = $false
-$lastPercent = 0
-Register-ObjectEvent -InputObject $webClient -EventName DownloadProgressChanged -Action {
-    $pct = $EventArgs.ProgressPercentage
-    if ($pct -ge ($script:lastPercent + 10)) {
-        $script:lastPercent = $pct
-        Write-Host "`r    Downloading... ${pct}%" -NoNewline
-    }
-} | Out-Null
-
 try {
-    $webClient.DownloadFile($tarAsset.browser_download_url, $tarPath)
+    $dlTask = $webClient.DownloadFileTaskAsync($tarAsset.browser_download_url, $tarPath)
+    # Stall guard: async WebClient requests ignore HttpWebRequest
+    # timeouts, so a silently dropped connection would spin forever.
+    $lastLen = -1L
+    $stallSince = Get-Date
+    while (-not $dlTask.IsCompleted) {
+        Start-Sleep -Milliseconds 500
+        $len = if (Test-Path $tarPath) { (Get-Item $tarPath).Length } else { 0 }
+        if ($len -ne $lastLen) {
+            $lastLen = $len
+            $stallSince = Get-Date
+            $mb = [math]::Round($len / 1MB, 1)
+            Write-Host ("`r    Downloading... {0}MB / {1}MB   " -f $mb, $tarSizeMB) -NoNewline
+        } elseif (((Get-Date) - $stallSince).TotalSeconds -gt 120) {
+            $webClient.CancelAsync()
+            throw "no data received for 2 minutes — connection stalled"
+        }
+    }
+    if ($dlTask.IsFaulted) { throw $dlTask.Exception.InnerException }
+    if ($dlTask.IsCanceled) { throw "download was cancelled" }
     Write-Host ""  # newline after progress
     Write-Success "Download complete"
 } catch {
     Write-Host ""
     Write-Fail "Download failed: $_"
+    Write-Host "    Your existing distro (if any) has not been touched. Re-run to retry." -ForegroundColor Yellow
+    Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
     return
 } finally {
     $webClient.Dispose()
-    Get-EventSubscriber | Unregister-Event -Force 2>$null
 }
 
-# Download checksum (with retry — GitHub CDN can be flaky)
+# Download checksum (with retry — GitHub CDN can be flaky).
+# -UseBasicParsing: PS 5.1 IWR otherwise depends on the IE engine,
+# which is absent/uninitialized on fresh systems.
 $shaDownloaded = $false
 for ($retry = 1; $retry -le 3; $retry++) {
     try {
-        Invoke-WebRequest -Uri $shaAsset.browser_download_url -OutFile $shaPath -Headers @{
+        Invoke-WebRequest -Uri $shaAsset.browser_download_url -OutFile $shaPath -UseBasicParsing -Headers @{
             'User-Agent' = 'CaeliCode-WSL-Installer'
         }
         $shaDownloaded = $true
@@ -281,6 +400,7 @@ if (-not $shaDownloaded) {
     Write-Fail "Failed to download checksum file after 3 attempts."
     Write-Host "    The image was downloaded but cannot be verified." -ForegroundColor Yellow
     Write-Host "    Please try running the installer again." -ForegroundColor Yellow
+    Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
     return
 }
 
@@ -303,15 +423,33 @@ if ($expectedHash -ne $actualHash) {
 Write-Success "Checksum verified: $($actualHash.Substring(0, 16))..."
 
 # ── 10. Create install directory and import ──────────────────────────
+# The release is now downloaded and checksum-verified — this is the
+# earliest safe moment to remove an existing distro.
+if ($RemoveExisting) {
+    Write-Step "Removing existing distro '$DistroName'..."
+    Invoke-Native { wsl.exe --unregister $DistroName 2>&1 | Out-Null }
+    Write-Success "Removed existing distro"
+}
+
 Write-Step "Importing WSL distro '$DistroName'..."
 
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
-$importResult = wsl.exe --import $DistroName $InstallDir $tarPath 2>&1
+# --version 2: guarantee a WSL2 distro even when the machine's default
+# is WSL1 (the image's interop features do not work under WSL1).
+$importResult = Invoke-Native { wsl.exe --import $DistroName $InstallDir $tarPath --version 2 2>&1 }
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "WSL import failed: $importResult"
+    Write-Host "    If this mentions WSL2 or virtualization, enable it first:" -ForegroundColor Yellow
+    Write-Host "      wsl --install --no-distribution" -ForegroundColor White
+    Write-Host "    then reboot and re-run this installer." -ForegroundColor Yellow
+    if ($UpgradeBackupPath) {
+        Write-Host ""
+        Write-Host "    Your pre-upgrade backup is safe. Restore it with:" -ForegroundColor Yellow
+        Write-Host "      wsl --import $DistroName `"$InstallDir`" `"$UpgradeBackupPath`" --version 2" -ForegroundColor White
+    }
     Remove-Item $tempDir -Recurse -Force
     return
 }
@@ -340,7 +478,7 @@ if (-not $fontInstalled) {
     foreach ($font in $fonts) {
         $fontTemp = Join-Path $env:TEMP $font.Name
         try {
-            Invoke-WebRequest -Uri $font.Url -OutFile $fontTemp -Headers @{
+            Invoke-WebRequest -Uri $font.Url -OutFile $fontTemp -UseBasicParsing -Headers @{
                 'User-Agent' = 'CaeliCode-WSL-Installer'
             }
             Copy-Item $fontTemp "C:\Windows\Fonts\" -Force
@@ -379,32 +517,48 @@ if ($wtPaths.Count -gt 0) {
     $fontConfigured = $false
     foreach ($wtPath in $wtPaths) {
         try {
-            # Windows Terminal settings.json often contains // comments,
-            # which ConvertFrom-Json on PowerShell 5.1 cannot parse.
-            # Strip single-line comments before parsing.
+            # Windows Terminal settings.json is JSONC (// comments), which
+            # ConvertFrom-Json cannot parse. Strip single-line comments
+            # before parsing. Round-tripping through ConvertTo-Json is
+            # inherently lossy (comments/formatting), so: skip the write
+            # entirely when the font is already set, and always keep a
+            # backup beside the original.
             $rawContent = Get-Content $wtPath -Raw
-            $stripped = $rawContent -replace '(?m)^\s*//.*$', '' -replace '(?<=,)\s*//.*$', ''
+            $stripped = $rawContent -replace '(?m)^\s*//.*$', '' -replace '(?m)(?<=,)\s*//.*$', ''
             $wtJson = $stripped | ConvertFrom-Json
 
-            # Ensure profiles object exists
-            if (-not $wtJson.profiles) { continue }
+            # Ensure profiles object exists (legacy array-shaped 'profiles'
+            # cannot carry defaults — leave those files alone)
+            if (-not $wtJson.profiles -or $wtJson.profiles -is [System.Array]) { continue }
+
+            if ($wtJson.profiles.defaults -and $wtJson.profiles.defaults.font -and
+                $wtJson.profiles.defaults.font.face -eq 'MesloLGS NF') {
+                $fontConfigured = $true   # already set — nothing to rewrite
+                continue
+            }
 
             # Set font in profile defaults so it applies to ALL profiles
             # (including the WSL distro which may not exist in WT yet).
-            # This is more reliable than searching for a specific profile
-            # because WT auto-discovers WSL distros on launch.
+            # PSCustomObject, NOT hashtables: Add-Member on a Hashtable
+            # attaches an ETS property that ConvertTo-Json silently
+            # drops (it serializes dictionary entries only).
             if (-not $wtJson.profiles.defaults) {
-                $wtJson.profiles | Add-Member -NotePropertyName "defaults" -NotePropertyValue @{} -Force
+                $wtJson.profiles | Add-Member -NotePropertyName "defaults" `
+                    -NotePropertyValue ([pscustomobject]@{}) -Force
             }
             $defaults = $wtJson.profiles.defaults
             if (-not $defaults.font) {
-                $defaults | Add-Member -NotePropertyName "font" -NotePropertyValue @{ face = "MesloLGS NF" } -Force
+                $defaults | Add-Member -NotePropertyName "font" `
+                    -NotePropertyValue ([pscustomobject]@{ face = "MesloLGS NF" }) -Force
             } else {
                 $defaults.font | Add-Member -NotePropertyName "face" -NotePropertyValue "MesloLGS NF" -Force
             }
 
+            Copy-Item $wtPath "$wtPath.caelicode-bak" -Force
             $wtJson | ConvertTo-Json -Depth 20 | Set-Content $wtPath -Encoding UTF8
             $fontConfigured = $true
+            Write-Host "    Note: comments in settings.json cannot survive a rewrite;" -ForegroundColor DarkGray
+            Write-Host "    original saved as settings.json.caelicode-bak" -ForegroundColor DarkGray
         } catch {
             # Non-fatal — user can set manually
             Write-Host "    Could not auto-configure $wtPath" -ForegroundColor DarkGray
@@ -435,18 +589,33 @@ if ($vscodePaths.Count -gt 0) {
     $vscodeConfigured = $false
     foreach ($vscodePath in $vscodePaths) {
         try {
-            $vscodeJson = Get-Content $vscodePath -Raw | ConvertFrom-Json
+            # VS Code settings.json is JSONC: strip // comments (same as
+            # the Windows Terminal path — plain ConvertFrom-Json throws on
+            # the comments most real settings files contain), skip if the
+            # font is already set, and keep a backup.
+            $rawVscode = Get-Content $vscodePath -Raw
+            $strippedVscode = $rawVscode -replace '(?m)^\s*//.*$', '' -replace '(?m)(?<=,)\s*//.*$', ''
+            $vscodeJson = $strippedVscode | ConvertFrom-Json
+            if ($vscodeJson.'terminal.integrated.fontFamily' -eq 'MesloLGS NF') {
+                $vscodeConfigured = $true
+                continue
+            }
             $vscodeJson | Add-Member -NotePropertyName "terminal.integrated.fontFamily" `
                 -NotePropertyValue "MesloLGS NF" -Force
+            Copy-Item $vscodePath "$vscodePath.caelicode-bak" -Force
             $vscodeJson | ConvertTo-Json -Depth 20 | Set-Content $vscodePath -Encoding UTF8
             $vscodeConfigured = $true
         } catch {
-            Write-Host "    Could not auto-configure VS Code settings" -ForegroundColor DarkGray
+            Write-Host "    Could not auto-configure $vscodePath" -ForegroundColor DarkGray
         }
     }
 
     if ($vscodeConfigured) {
         Write-Success "VS Code terminal configured with MesloLGS NF font"
+        Write-Host "    Original saved as settings.json.caelicode-bak (comments cannot survive a rewrite)" -ForegroundColor DarkGray
+    } else {
+        Write-Host "    Auto-config failed — set it manually in VS Code:" -ForegroundColor Yellow
+        Write-Host "    Settings (Ctrl+,) > search 'terminal font' > set 'MesloLGS NF'" -ForegroundColor DarkGray
     }
 } else {
     Write-Host "    VS Code settings not found — if using VS Code, set the font manually:" -ForegroundColor DarkGray
@@ -481,5 +650,17 @@ Write-Host ""
 Write-Host "  Open in VS Code (requires VS Code on Windows):" -ForegroundColor Yellow
 Write-Host "    wsl -d $DistroName -- code ." -ForegroundColor White
 Write-Host ""
+Write-Host "  Staying up to date:" -ForegroundColor Yellow
+Write-Host "    A daily background check notifies you at login when a new" -ForegroundColor DarkGray
+Write-Host "    release ships. Apply updates in-place with: caelicode-update" -ForegroundColor DarkGray
+Write-Host ""
+if ($UpgradeBackupPath) {
+    Write-Host "  Your pre-upgrade backup:" -ForegroundColor Yellow
+    Write-Host "    $UpgradeBackupPath" -ForegroundColor White
+    Write-Host "    Restore files from it any time:" -ForegroundColor DarkGray
+    Write-Host "      wsl --import ${DistroName}-old `$env:TEMP\caelicode-old `"$UpgradeBackupPath`"" -ForegroundColor DarkGray
+    Write-Host "    Delete it once you've confirmed the new install." -ForegroundColor DarkGray
+    Write-Host ""
+}
 
 } @args

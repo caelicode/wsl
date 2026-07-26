@@ -2,32 +2,36 @@
 
 CaeliCode WSL uses a profile-based architecture. Each profile builds on the shared **base** layer and adds tools specific to a role.
 
+All tool versions are pinned exactly in `profiles/*.toml` — check any
+release's `sbom.json` asset for the complete resolved inventory
+(including apt packages) of the images you are running.
+
 ## Base
 
 The foundation layer included in every profile.
 
-**System packages:** bash-completion, ca-certificates, curl, dnsutils, git, gnupg, jq, nano, openssh-client, socat, sudo, unzip, vim, wget
+**System packages:** bash-completion, ca-certificates, curl, dnsutils, git, gnupg, htop, jq, nano, netcat, openssh-client, socat, sudo, tmux, tree, unzip, vim, wget, zip, zsh
 
-**Managed tools (via mise):** Python 3.12
+**Managed tools (via mise):** Python 3.12, gh, fzf, ripgrep, fd, bat, eza, delta, direnv, zoxide, yq
 
-**CaeliCode features:** Dynamic DNS, SSH agent bridge, proxy detection, health check, in-place updates, configurable MOTD and PS1.
+**CaeliCode features:** In-place updates with rollback, update notifications, SSH agent bridge, Windows proxy detection, health check, prompt themes, configurable MOTD.
 
 ## SRE
 
 For platform engineers, DevOps, and infrastructure teams.
 
-Everything in base, plus:
+Everything in base, plus (versions as currently pinned in `profiles/sre.toml`):
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| kubectl | 1.35.1 | Kubernetes CLI |
-| helm | 4.1.1 | Kubernetes package manager |
-| terraform | 1.14.5 | Infrastructure as code |
-| k9s | 0.50.18 | Kubernetes TUI dashboard |
-| argocd | 3.3.1 | GitOps continuous delivery |
-| trivy | 0.71.0 | Container security scanner |
+| Tool | Purpose |
+|------|---------|
+| kubectl, helm, k9s | Kubernetes CLI, package manager, TUI dashboard |
+| argocd, flux2 | GitOps continuous delivery |
+| kubectx/kubens, kustomize, stern | Context switching, manifests, log tailing |
+| terraform, packer, vault | Infrastructure as code & secrets |
+| AWS CLI, Azure CLI, Google Cloud SDK, eksctl | Cloud CLIs |
+| trivy | Container/security scanner |
 
-**Shell aliases:** `k` → kubectl, `kgp` → kubectl get pods, `kgs` → kubectl get svc, `tf` → terraform, `tfi` → terraform init, `tfp` → terraform plan, `tfa` → terraform apply
+**Shell aliases:** `k` → kubectl, `kgp` → kubectl get pods, `kgs` → kubectl get svc, `tf` → terraform, `tfi` → terraform init, `tfp` → terraform plan, `tfa` → terraform apply (aliases only activate when the tool is present)
 
 ## Dev
 
@@ -35,13 +39,12 @@ For software developers working across multiple languages.
 
 Everything in base, plus:
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| Node.js | 24.13.1 | JavaScript/TypeScript runtime |
-| Go | 1.26.0 | Go programming language |
-| Rust | 1.93.1 | Rust programming language |
-| uv | 0.6.3 | Fast Python package manager |
-| Podman | system | Rootless container runtime |
+| Tool | Purpose |
+|------|---------|
+| Node.js, Go, Rust, Java (Temurin 21), Bun | Language runtimes |
+| uv | Fast Python package manager |
+| Podman | Rootless container runtime (apt package) |
+| lazygit, shellcheck, hadolint | Developer tooling |
 
 **Note:** Podman is installed via apt (system package) rather than mise, providing rootless container support inside WSL.
 
@@ -51,17 +54,21 @@ For data engineers, analysts, and ML practitioners.
 
 Everything in base, plus:
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| Python | 3.12.9 | Primary language |
-| uv | 0.6.3 | Fast Python package manager |
-| dbt-core | latest | Data transformation framework |
-| dbt-postgres | latest | PostgreSQL adapter for dbt |
-| PostgreSQL client | system | psql, pg_dump, etc. |
+| Tool | Purpose |
+|------|---------|
+| uv | Fast Python package manager |
+| dbt-core + dbt-postgres | Data transformation framework |
+| DuckDB | In-process analytics database |
+| JupyterLab | Notebooks |
+| PostgreSQL client, Redis client, SQLite | Database clients (apt packages) |
 
 ## Version Pinning
 
-All tool versions are pinned in `profiles/*.toml` files. Renovate automatically opens PRs when new versions are available, so you get updates without losing reproducibility.
+Every mise-managed tool is pinned to an exact version in
+`profiles/*.toml`, each carrying a `# renovate:` annotation.
+[Renovate](https://docs.renovatebot.com/) opens PRs when new versions
+ship; CI rebuilds and tests all four profiles before a bump can merge,
+so you get updates without losing reproducibility.
 
 To check which versions are installed:
 

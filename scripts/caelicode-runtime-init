@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# CaeliCode WSL — once-per-boot runtime glue
+#
+# Kicked asynchronously from interactive shell init. Windows interop
+# (netsh.exe, npiperelay.exe) is not reliably available to early systemd
+# units in WSL, so the interop-dependent services start from the first
+# interactive shell of each boot instead:
+#   • proxy detection  (proxy.detect_enabled)   → /etc/profile.d env + CA merge
+#   • SSH agent bridge (ssh.agent_forwarding)   → socket for SSH_AUTH_SOCK
+#
+# Safe to run repeatedly: the flag is namespaced by BOOT ID and UID —
+# /tmp on the distro's ext4 survives `wsl --shutdown`, so a bare /tmp
+# flag would turn "once per boot" into "once ever" (and one user's flag
+# would suppress every other user's bridge). Each step degrades
+# silently when its prerequisites (sudo, npiperelay) are missing.
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CFG="${SCRIPT_DIR}/caelicode-config"
+
+BOOT_ID="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo unknown)"
+FLAG="${XDG_RUNTIME_DIR:-/tmp}/caelicode-runtime-init.$(id -u).${BOOT_ID}.done"
+
+[ -e "$FLAG" ] && exit 0
+
+cfg_enabled() {
+    # cfg_enabled <key> <default>
+    if [ -x "$CFG" ]; then "$CFG" is-enabled "$1" "$2"; else [ "$2" = "true" ]; fi
+}
+
+# ── Proxy detection (needs root: writes /etc/profile.d + trust store) ─
+if cfg_enabled proxy.detect_enabled true && [ -x "${SCRIPT_DIR}/proxy-detect.sh" ]; then
+    sudo -n "${SCRIPT_DIR}/proxy-detect.sh" >/dev/null 2>&1 || true
+fi
+
+# ── SSH agent bridge (runs as the user; socket mode 600) ─────────────
+# No socket-existence gate here: a stale socket file survives reboots
+# in the /tmp fallback, and the bridge itself is idempotent — it probes
+# liveness, exits if another bridge is serving, and replaces dead
+# sockets.
+if cfg_enabled ssh.agent_forwarding true && [ -x "${SCRIPT_DIR}/ssh-bridge.sh" ]; then
+    nohup "${SCRIPT_DIR}/ssh-bridge.sh" >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+fi
+
+# ── DNS watcher (root; opt-in; single instance via its own lock) ─────
+if cfg_enabled dns.watch_enabled false && [ -x "${SCRIPT_DIR}/caelicode-dns-watch.sh" ]; then
+    sudo -n nohup "${SCRIPT_DIR}/caelicode-dns-watch.sh" >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+fi
+
+# ── Windows toast for pending updates (opt-in; once per version) ─────
+# The systemd timer that runs the check has no Windows interop; this
+# is where the toast actually fires, on the first login of a boot.
+if [ -x "${SCRIPT_DIR}/caelicode-notify" ]; then
+    "${SCRIPT_DIR}/caelicode-notify" update-available >/dev/null 2>&1 || true
+fi
+
+touch "$FLAG" 2>/dev/null || true

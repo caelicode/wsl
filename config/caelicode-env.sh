@@ -16,5 +16,10 @@ case ":${PATH}:" in
     *) export PATH="/opt/mise/bin:${PATH}" ;;
 esac
 
+# Rust toolchain lives system-wide under /opt/mise; the rustup proxies
+# in cargo/bin dispatch through RUSTUP_HOME. (CARGO_HOME is left unset
+# so each user's `cargo install` writes to their own ~/.cargo.)
+export RUSTUP_HOME="/opt/mise/rustup"
+
 # Starship prompt config
 export STARSHIP_CONFIG="/etc/caelicode/starship.toml"

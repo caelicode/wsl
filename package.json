@@ -6,6 +6,14 @@
     "type": "git",
     "url": "https://github.com/caelicode/wsl.git"
   },
+  "devDependencies": {
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/exec": "7.1.0",
+    "@semantic-release/github": "12.0.9",
+    "@semantic-release/release-notes-generator": "14.1.1",
+    "conventional-changelog-conventionalcommits": "10.2.1",
+    "semantic-release": "25.0.8"
+  },
   "release": {
     "branches": ["main"],
     "tagFormat": "v${version}",
@@ -22,10 +30,22 @@
       ["@semantic-release/release-notes-generator", {
         "preset": "conventionalcommits"
       }],
+      ["@semantic-release/exec", {
+        "prepareCmd": "bash .github/scripts/prepare-release-assets.sh ${nextRelease.version}"
+      }],
       ["@semantic-release/github", {
+        "draftRelease": true,
         "successComment": false,
         "failTitle": false,
-        "releasedLabels": false
+        "releasedLabels": false,
+        "assets": [
+          { "path": "dist/caelicode-wsl-*.tar.gz" },
+          { "path": "dist/*.sha256" },
+          { "path": "dist/checksums.txt" },
+          { "path": "dist/sbom.json" },
+          { "path": "dist/caelicode-manifest.json" },
+          { "path": "dist/caelicode-update-payload.tar.gz" }
+        ]
       }]
     ]
   }

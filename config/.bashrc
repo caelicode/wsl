@@ -1,7 +1,7 @@
 # ~/.bashrc: CaeliCode WSL shell initialization
 
 # If not running interactively, don't do anything
-[ -z "$PS1" ] && return
+[ -z "${PS1:-}" ] && return
 
 # ── History ──────────────────────────────────────────────────────────
 HISTCONTROL=ignoredups:ignorespace
@@ -19,6 +19,14 @@ shopt -s globstar 2>/dev/null
 # ── PATH ─────────────────────────────────────────────────────────────
 # NO mise shims — all tools are symlinked into /opt/mise/bin/ at build time.
 export PATH="/opt/mise/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# ── SSL/TLS ──────────────────────────────────────────────────────────
+# Kept in sync with .zshrc so bash and zsh behave identically behind
+# corporate MITM proxies.
+export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+export NODE_OPTIONS=--use-openssl-ca
 
 # ── Starship Prompt ──────────────────────────────────────────────────
 export STARSHIP_CONFIG="/etc/caelicode/starship.toml"
@@ -58,19 +66,25 @@ if [[ -x /opt/mise/bin/fzf ]]; then
     eval "$(/opt/mise/bin/fzf --bash 2>/dev/null)" || true
 fi
 
-# ── CaeliCode MOTD ───────────────────────────────────────────────────
-if [ -z "$CAELICODE_MOTD_SHOWN" ]; then
-    export CAELICODE_MOTD_SHOWN=1
-    PROFILE=$(cat /opt/caelicode/PROFILE 2>/dev/null || echo "base")
-    VERSION=$(cat /opt/caelicode/VERSION 2>/dev/null || echo "dev")
-
-    echo ""
-    echo -e "\033[1;36m  ╔═══════════════════════════════════════════╗\033[0m"
-    echo -e "\033[1;36m  ║\033[0m  \033[1;37mCaeliCode WSL\033[0m"
-    echo -e "\033[1;36m  ║\033[0m  \033[0;37mProfile: ${PROFILE} │ Version: ${VERSION}\033[0m"
-    echo -e "\033[1;36m  ╚═══════════════════════════════════════════╝\033[0m"
-    echo ""
+# ── SSH agent bridge socket ──────────────────────────────────────────
+# Liveness-probe the socket (not just -S): in the /tmp fallback a dead
+# socket file survives WSL reboots, and exporting it breaks ssh in
+# every shell until it is cleaned up.
+if [ -z "${SSH_AUTH_SOCK:-}" ] && command -v socat >/dev/null 2>&1; then
+    for _cc_sock in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/caelicode-ssh-agent.sock" /tmp/caelicode-ssh-agent.sock; do
+        if [ -S "$_cc_sock" ] && socat -u OPEN:/dev/null "UNIX-CONNECT:$_cc_sock" 2>/dev/null; then
+            export SSH_AUTH_SOCK="$_cc_sock"; break
+        fi
+    done
+    unset _cc_sock
 fi
+
+# ── CaeliCode MOTD, update notice & runtime init ─────────────────────
+# (falls back to the legacy flat layout for pre-releases-era images)
+for _cc_motd in /opt/caelicode/current/scripts/caelicode-motd.sh /opt/caelicode/scripts/caelicode-motd.sh; do
+    if [ -r "$_cc_motd" ]; then . "$_cc_motd"; break; fi
+done
+unset _cc_motd
 
 # ── Aliases ──────────────────────────────────────────────────────────
 if [ -f ~/.bash_aliases ]; then
