@@ -364,18 +364,26 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          # 12 = the amd64 core: 4 image tars + 4 sha256 + checksums +
-          # sbom + manifest + payload. arm64 (preview) assets are
-          # optional extras on top.
-          EXPECTED_ASSETS=12
+          # Completeness is checked BY NAME, not by count: a runner
+          # killed mid-upload leaves a draft holding all the small
+          # assets (sha256s, manifest, payload…) but none of the image
+          # tars — a raw asset count would happily publish that.
+          REQUIRED="caelicode-wsl-base.tar.gz caelicode-wsl-sre.tar.gz caelicode-wsl-dev.tar.gz caelicode-wsl-data.tar.gz caelicode-manifest.json caelicode-update-payload.tar.gz checksums.txt sbom.json"
           gh api "repos/${{ github.repository }}/releases?per_page=15" \
-            --jq '.[] | select(.draft == true) | [.id, .tag_name, (.assets | length)] | @tsv' \
-          | while IFS=$'\t' read -r id tag assets; do
-              if [ "$assets" -ge "$EXPECTED_ASSETS" ]; then
-                echo "Publishing stranded draft ${tag} (${assets} assets)"
+            --jq '.[] | select(.draft == true) | [.id, .tag_name, ([.assets[].name] | join(","))] | @tsv' \
+          | while IFS=$'\t' read -r id tag names; do
+              missing=""
+              for want in $REQUIRED; do
+                case ",${names}," in
+                  *",${want},"*) ;;
+                  *) missing="${missing} ${want}" ;;
+                esac
+              done
+              if [ -z "$missing" ]; then
+                echo "Publishing stranded draft ${tag} (all required assets present)"
                 gh api -X PATCH "repos/${{ github.repository }}/releases/${id}" \
                   -F draft=false >/dev/null
               else
-                echo "::warning::Draft ${tag} has ${assets}/${EXPECTED_ASSETS} assets — incomplete upload. Delete the draft and its tag, then push a release commit."
+                echo "::warning::Draft ${tag} is incomplete — missing:${missing}. Complete it from the run's retained artifacts (gh run download + gh release upload), or delete the draft AND its tag, then push a release commit."
               fi
             done
